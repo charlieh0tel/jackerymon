@@ -159,7 +159,16 @@ The RC4 key is **per device**.  The handset does not derive it; it is
 fetched from the cloud endpoint `device/bluetoothKey` (by serial) and
 handed to the codec.  Model code 12 (Explorer 2000) selects the codec
 variant with no IV. The saved key now successfully decodes a live status
-response. Obtaining it without cloud bootstrap remains unresolved.
+response. The user removed Wi-Fi credentials before testing began; all
+BLE tests used the unit in that state. Three repeat queries succeeded with
+the same saved key and no retries or client cloud requests. These tests do
+not measure key changes on Wi-Fi credential removal. Power-cycle/reset/
+unbinding behavior is untested.
+Obtaining the key without cloud bootstrap remains unresolved.
+
+The PoC's `StatusSession` owns one pending query and its decoder. It
+ignores notifications outside a pending request and rejects overlapping
+queries; disconnects fail the current query immediately.
 
 ### Commands
 

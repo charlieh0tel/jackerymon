@@ -357,48 +357,69 @@ async def read_status(path, address, timeout):
             await asyncio.sleep(RECONNECT_DELAY)
 
 
+class StatusSession:
+    """One BLE connection with a single pending status request."""
+
+    def __init__(self, key):
+        self.key = key
+        self.decoder = None
+        self.result = None
+        self.disconnected = asyncio.Event()
+
+    def on_disconnect(self, _client):
+        self.disconnected.set()
+        if self.result is not None and not self.result.done():
+            self.result.set_exception(
+                BleakError("Device disconnected before status completed")
+            )
+
+    def receive(self, _characteristic, fragment):
+        if self.result is None or self.result.done():
+            return
+        try:
+            status = self.decoder.feed(fragment)
+            if status is not None:
+                self.result.set_result(status)
+        except (ValueError, TypeError) as error:
+            self.result.set_exception(error)
+
+    async def query(self, client, timeout):
+        if self.disconnected.is_set():
+            raise BleakError("Device disconnected before status request")
+        if self.result is not None:
+            raise RuntimeError("A status request is already pending")
+        self.decoder = StatusDecoder(self.key)
+        self.result = asyncio.get_running_loop().create_future()
+        try:
+            await client.write_gatt_char(
+                COMMAND, status_command(self.key), response=False
+            )
+            try:
+                return await asyncio.wait_for(self.result, timeout)
+            except TimeoutError:
+                raise TimeoutError(
+                    f"No complete status response ({self.decoder.received} notification bytes)"
+                ) from None
+        finally:
+            if self.result.done() and not self.result.cancelled():
+                self.result.exception()
+            else:
+                self.result.cancel()
+            self.result = None
+            self.decoder = None
+
+
 async def status_attempt(matches, key, timeout):
     device = await BleakScanner.find_device_by_filter(matches, timeout=timeout)
     if device is None:
         raise BleakError("Saved device identity not found in BLE advertisements")
-    decoder = StatusDecoder(key)
-    result = asyncio.get_running_loop().create_future()
-
-    def disconnected(_client):
-        if not result.done():
-            result.set_exception(
-                BleakError("Device disconnected before status completed")
-            )
-
-    def receive(_characteristic, fragment):
-        if result.done():
-            return
-        try:
-            status = decoder.feed(fragment)
-            if status is not None:
-                result.set_result(status)
-        except (ValueError, TypeError) as error:
-            result.set_exception(error)
-
-    try:
-        async with BleakClient(
-            device, timeout=timeout, disconnected_callback=disconnected
-        ) as client:
-            await client.start_notify(NOTIFY, receive)
-            await client.write_gatt_char(COMMAND, status_command(key), response=False)
-            try:
-                return await asyncio.wait_for(result, timeout)
-            except TimeoutError:
-                raise TimeoutError(
-                    f"No complete status response ({decoder.received} notification bytes)"
-                ) from None
-    finally:
-        # Disconnect stops notifications. stop_notify here can mask the actual
-        # failure because Bleak clears its service table on disconnect.
-        if result.done() and not result.cancelled():
-            result.exception()
-        else:
-            result.cancel()
+    session = StatusSession(key)
+    # Disconnect stops notifications; stop_notify can mask a transport failure.
+    async with BleakClient(
+        device, timeout=timeout, disconnected_callback=session.on_disconnect
+    ) as client:
+        await client.start_notify(NOTIFY, session.receive)
+        return await session.query(client, timeout)
 
 
 def main():

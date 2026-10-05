@@ -58,9 +58,16 @@ response wait, so the full retry sequence can take longer.
 
 Live status succeeded on the Explorer 2000 with the user-acquired key:
 100% battery, 0 W input/output, 33.3 C battery temperature, outputs off,
-and error code 0. The status process made no cloud requests. Long-term
-key validity and operation with the unit's internet blocked remain
-unverified. Cloud access is needed for the implemented key acquisition.
+and error code 0. The user removed Wi-Fi credentials before testing began;
+all these BLE tests used a unit without Wi-Fi connectivity. Three repeat
+status reads succeeded with the existing key and no retries.
+The status process made no cloud requests. Long-term key validity and
+behavior after power-cycle/reset/unbinding remain unverified. Cloud
+access is needed for the implemented key acquisition.
+
+Internally, `StatusSession` owns connection-loss notification and one
+pending request, with a fresh decoder for each query. This separates
+request state from connection setup in preparation for polling.
 
 Offline tests:
 

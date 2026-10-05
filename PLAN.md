@@ -25,6 +25,8 @@ Summary:
   `tools/jackery_key.py` reproduces advertisement decoding and cloud key
   acquisition, plus a validated model-12 GATT status query. The user
   completed login and supplied the resulting local key file.
+  Wi-Fi credentials were removed before testing began. Three repeat
+  reads succeeded using the same saved key with no reconnect retries.
 
 No Rust code is written yet. The immediate transport blocker is resolved;
 the Python PoC provides a reference for the eventual Rust BLE backend.
@@ -34,10 +36,14 @@ the Python PoC provides a reference for the eventual Rust BLE backend.
 - **Direct monitoring, cloud bootstrap PoC.** The user authorized a Python
   PoC reproducing the app's cloud key retrieval. This is an exception to
   the earlier no-cloud research scope. Monitoring should still use BLE
-  directly. One status query succeeded without cloud requests from the
-  client; key lifetime and a fully internet-isolated test remain open.
+  directly. Status queries succeeded without client cloud requests and
+  with Wi-Fi credentials already absent before testing. Sustained polling,
+  key lifetime, and power-cycle behavior remain to be tested.
 - **Python tooling uses uv.** Inline script dependencies keep the PoC
   runnable without a manually managed virtual environment.
+- **BLE request state belongs to a session.** `StatusSession` separates
+  notification/disconnect handling and per-query decoder state from the
+  connection setup, preparing to reuse a connection for polling.
 - **Bounded BLE reconnects.** The unit sometimes disconnects during service
   discovery or before status arrives. The read-only query retries transport
   failures three times with fresh discovery and decoder state. Protocol/key

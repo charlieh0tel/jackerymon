@@ -128,8 +128,16 @@ made by the status process. Selected returned values:
 | `oac`, `odc` | 0 | AC/DC outputs off |
 | `ec` | 0 | No reported error |
 
-The unit's internet was not blocked during this test. Key lifetime and
-behavior after reset/unbinding are still unknown.
+Correction: the user removed Wi-Fi credentials before testing began, so
+the initial and repeat BLE tests all used a unit without Wi-Fi connectivity.
+Three repeat status reads succeeded with the same saved key, with no retries. Durations
+(discovery, connection, query, cleanup) were 4.90, 3.08, and 3.26 seconds.
+All three returned `rb=100`, `bt=332`, `ip=0`, `op=0`, and `ec=0`.
+The client made no cloud requests. Network isolation is based on the
+user's credential removal, not a router-side packet capture. These tests
+do not establish whether credential removal changes a key acquired earlier.
+Key lifetime and behavior
+after power-cycle/reset/unbinding are still unknown.
 
 Subsequent reads exposed intermittent disconnects during service discovery
 and before status completion. The original unconditional `stop_notify`
