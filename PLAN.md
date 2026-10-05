@@ -7,12 +7,12 @@ architectural changes; update when a decision changes.
 
 A Rust workspace for monitoring Jackery units that can do MQTT:
 a library, a logging daemon, a TUI, and a Prometheus exporter.
-Start with IP; BLE may come later.
+Investigate Explorer BLE first with a small Python bootstrap PoC.
 
-## Current state (2026-10-04): blocked on transport
+## Current state (2026-10-04): direct BLE status works
 
-We have no working direct, no-cloud transport to the test unit (an
-Explorer 2000).  See [FINDINGS.md](FINDINGS.md) for the full evidence.
+The Python PoC reads status directly from the Explorer 2000 over BLE
+using a user-acquired key. See [FINDINGS.md](FINDINGS.md) for the evidence.
 Summary:
 
 - **Local MQTT** is real and documented, but only for the SolarVault3
@@ -20,36 +20,40 @@ Summary:
   showed no MQTT configuration page.
 - **IP** is a dead end for the Explorer 2000: it runs no services and
   only dials Jackery's cloud over TLS pinned to a private CA.
-- **BLE** is physically reachable and its frame format is understood,
-  but each unit's BLE traffic is obfuscated with a per-device key that
-  presently lives only behind Jackery's cloud account API.  A no-cloud
-  BLE path is blocked on obtaining that key offline.
+- **BLE** status has been validated with a per-device key that
+  is fetched from Jackery's cloud and cached by the Android app.
+  `tools/jackery_key.py` reproduces advertisement decoding and cloud key
+  acquisition, plus a validated model-12 GATT status query. The user
+  completed login and supplied the resulting local key file.
 
-No Rust code is written yet; blocking that on a decision about
-transport (below) avoids building against an interface we cannot reach.
+No Rust code is written yet. The immediate transport blocker is resolved;
+the Python PoC provides a reference for the eventual Rust BLE backend.
 
 ## Decisions
 
-- **No cloud.**  The project talks to units directly only.  Jackery
-  cloud protocol facts are reference material (for property keys and
-  command semantics), not a runtime dependency.
+- **Direct monitoring, cloud bootstrap PoC.** The user authorized a Python
+  PoC reproducing the app's cloud key retrieval. This is an exception to
+  the earlier no-cloud research scope. Monitoring should still use BLE
+  directly. One status query succeeded without cloud requests from the
+  client; key lifetime and a fully internet-isolated test remain open.
+- **Python tooling uses uv.** Inline script dependencies keep the PoC
+  runnable without a manually managed virtual environment.
+- **Bounded BLE reconnects.** The unit sometimes disconnects during service
+  discovery or before status arrives. The read-only query retries transport
+  failures three times with fresh discovery and decoder state. Protocol/key
+  errors fail immediately. Notification cleanup is left to disconnect.
 - **Transport is abstract.**  Whatever lands first (SolarVault local
   MQTT, or BLE on some unit), the library models a unit's state and
   commands behind a transport trait, so MQTT and BLE are
-  interchangeable backends.  This keeps the Explorer blocker from
-  dictating the whole design.
+  interchangeable backends.
 - **Property model follows the wire keys.**  Both the cloud/MQTT and
   BLE paths use the same short property keys (`rb`, `ip`, `op`, ...),
   so one typed model serves all transports.
 
 ## Open decisions (need user input)
 
-1. Which transport to build against first, given the Explorer is
-   blocked:
-   - target SolarVault3-style local MQTT (needs such a unit), or
-   - pursue a no-cloud BLE key path for the Explorer (currently no
-     known method), or
-   - park until Jackery documents local Explorer access.
+1. Whether the bootstrap key permits sustained offline BLE monitoring,
+   and whether reset or unbinding invalidates it.
 2. Scope of "units that can do MQTT" in AGENTS.md vs. adding BLE as a
    first-class transport now rather than "future work".
 

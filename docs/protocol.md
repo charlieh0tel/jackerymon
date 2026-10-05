@@ -75,24 +75,82 @@ fragmented and must be reassembled.
 ### Advertisement
 
 - Local name `HT`.
-- Manufacturer data: ASCII decimal digits encoding a device identifier.
-- Service data under `0xbdee`: 14 bytes that change between
-  advertisements (not yet decoded; may be a rolling token).
+- Manufacturer data: reconstruct the two-byte company ID in little-endian
+  order. Byte 0 is category (2 = Jackery device), byte 1 is the first
+  ASCII serial character; append the remaining manufacturer bytes.
+- For 14-byte `0xbdee` service data, RC4-decrypt using UTF-8 bytes of
+  `serial[:3] + serial[-5:] + "LYx*G!6u9#"`. This advertisement key is
+  distinct from the private GATT key.
+- Check CRC-16/MODBUS over all but the last two bytes; trailer is
+  little-endian. The preceding byte is the XOR mask for the body.
+- Decoded body: model (2 bytes, big-endian), GUID (6 bytes), battery
+  (1 byte), bind/reset counter (2 bytes, big-endian). The older 13-byte
+  variant omits RC4 and the battery byte; CRC/XOR processing is the same.
+- Source: `fb/e.java`, `fb/a.java`, `yb/d.java`, `yb/b.java`, `yb/w.java`.
+  Synthetic fixtures and a live test-unit scan validate decoding. The live
+  result was model 12, battery 100, bind/reset counter 3, and a six-byte GUID.
+
+### Cloud key bootstrap (Android 2.4.2)
+
+Base URL: `https://iot.jackeryapp.com/v1/`. Successful envelopes have
+`code: 0`, `data`, and optionally a replacement `token`. Subsequent
+requests carry the token in header `token`, not Authorization.
+
+- `POST auth/login`, form fields `aesEncryptData` and `rsaForAesKey`.
+  Generate 16 random bytes, base64-encode them, and use the resulting
+  24 ASCII bytes as the AES-192 key. Encrypt compact login JSON using
+  AES/ECB/PKCS7; base64-encode ciphertext. RSA-wrap the same ASCII key
+  with the APK's public key using PKCS#1 v1.5; base64-encode it.
+  Login JSON includes account, password, loginType=2, regionCode,
+  registerAppId=com.hbxn.jackery, and macId (client identifier).
+- `GET device/bluetoothKey`, query parameters `deviceSn` and uppercase
+  hex `guid`. The app uses this endpoint on its home-system path;
+  acceptance for an unbound Explorer is unverified.
+- Explorer scan-to-bind uses `POST device/bind`, form fields `devId`
+  (advertised serial), `guid`, `bindKey` (advertised counter), and
+  `timezoneOffset` (local UTC offset in minutes). Its response model
+  includes `bluetoothKey`; the PoC requires explicit `--bind`.
+- App headers include platform=2, app_version=2.4.2,
+  app_version_code=101, Accept-Language, sys_version, model, network.
+
+Sources: `LoginApi.java`, `vc/b.java`, `ce/d.java`, `ce/h.java`,
+`DeviceBluetoothApi.java`, `DeviceBindApi.java`, `AppApplication.java`,
+`RequestServer.java`, `BluetoothScanDeviceActivity.java` in scratch sources.
+The user completed login and a key file was produced; that key was then
+validated with a live GATT status query. The specific bootstrap endpoint
+used was not captured in this session. The PoC saves only selected device
+metadata/key, not the password or account token.
 
 ### Frame format
 
-Messages are ASCII-hex structures, not plaintext JSON.  Layers,
-outermost last:
+The wire carries binary bytes; the APK represents them as hex strings.
+For model 12 (`hb/g.java`), encode in this order:
 
-1. Inner payload begins with marker `DFEC`, then a type byte
-   (`00` single, `80` paginated), then the body.
-2. CRC-16/MODBUS appended (poly `0x8005` / reversed `0xA001`, init
-   `0xFFFF`, output byte-swapped as two hex pairs).
-3. A single random byte is chosen; the hex string is XORed byte-wise by
-   it; the XOR byte is carried in the frame.
-4. The whole thing is run through RC4 to produce the bytes written to
-   `0xee01`.  Notifications on `0xee02` reverse this; a valid decrypt
-   starts with `DFEC`.
+1. Inner payload: `DFEC`, flags/code byte, action ID, message type,
+   one-byte body length, then body. Empty read-status request:
+   `DFEC00060300` (action 6, message type 3).
+2. Choose a nonzero random byte, XOR every inner byte by it, append mask.
+3. Append CRC-16/MODBUS over the XORed bytes plus mask (poly reversed
+   `0xA001`, init `0xFFFF`, two-byte little-endian result).
+4. RC4-encrypt the complete packet with the base64-decoded cloud key.
+   RC4 restarts for each packet. Write to `0xee01` without response;
+   subscribe to `0xee02` before writing.
+
+On receive, reverse RC4, check CRC, strip CRC/mask, undo XOR, verify
+`DFEC`. The first post-marker byte's high bit indicates pagination;
+its lower seven bits are a result code. For paginated responses, the
+one-byte body length is followed by two-byte big-endian page index and
+page count, then body (`ac/e.java`). Concatenate pages in index order
+before JSON decoding. Notification fragmentation and protocol pagination
+are separate layers. The PoC bounds total received bytes and rejects
+conflicting pages, invalid CRCs, and nonzero device result codes.
+
+BLE connection loss clears Bleak's service table. Notifications stop on
+disconnect, so the PoC does not call `stop_notify` during teardown. It
+detects disconnects while awaiting status and retries transport failures
+with fresh discovery, connection, and page assembly, up to three attempts.
+CRC/key/device-response errors are not retried. This recovered successfully
+from an observed disconnect; it does not establish the reason for the drop.
 
 Send templates (hex): `DFEC00%s%s%s%s`, paginated `DFEC80%s%s%s%s%s%s`;
 a newer variant uses a `DFED0001...` header.
@@ -100,8 +158,8 @@ a newer variant uses a `DFED0001...` header.
 The RC4 key is **per device**.  The handset does not derive it; it is
 fetched from the cloud endpoint `device/bluetoothKey` (by serial) and
 handed to the codec.  Model code 12 (Explorer 2000) selects the codec
-variant with no fixed IV.  Without this key the BLE link cannot be
-exercised; obtaining it offline is unresolved (see FINDINGS.md).
+variant with no IV. The saved key now successfully decodes a live status
+response. Obtaining it without cloud bootstrap remains unresolved.
 
 ### Commands
 
