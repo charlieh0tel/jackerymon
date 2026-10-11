@@ -9,7 +9,7 @@ A Rust workspace for monitoring Jackery units over BLE:
 a library, a logging daemon, a TUI, and a Prometheus exporter.
 Prove the Explorer protocol with a small Python PoC, then port it to Rust.
 
-## Current state (2026-10-10): BLE status works; unit not advertising
+## Current state (2026-10-10): BLE status works; key survives power-cycle
 
 The Python PoC reads status directly from the Explorer 2000 over BLE
 using a user-acquired key. See [FINDINGS.md](FINDINGS.md) for the evidence.
@@ -27,11 +27,9 @@ Summary:
   A five-minute run with USB, AC, and light enabled produced 60 samples
   on one connection, zero failures, and 216.2 ms median query latency.
 
-Since the user power-cycled the unit on 2026-10-05, it has not been
-discovered. A privileged `btmon` capture saw 37 other devices and no
-Jackery advertisement at the HCI layer, so Bleak/BlueZ filtering
-alone cannot explain it.
-Saved-key persistence after power-cycle is therefore still untested.
+After a 2026-10-05 power-cycle the unit stopped advertising for days
+(no Jackery advertisement at the HCI layer); by 2026-10-10 it was back,
+cause unknown. The saved key then still worked: it survives power-cycle.
 
 No Rust code is written yet. The Python PoC provides a reference for
 the eventual Rust BLE backend.
@@ -43,8 +41,8 @@ the eventual Rust BLE backend.
   the earlier no-cloud research scope. Monitoring should still use BLE
   directly. Status queries succeeded without client cloud requests and
   with Wi-Fi credentials already absent before testing. Short persistent
-  polling is validated; long-duration reliability, key lifetime, and
-  power-cycle behavior remain to be tested.
+  polling is validated and the key survives power-cycle; long-duration
+  reliability, key lifetime, and reset/unbinding remain to be tested.
 - **Python tooling uses uv.** Inline script dependencies keep the PoC and tests
   runnable without a manually managed virtual environment.
 - **BLE request state belongs to a session.** `StatusSession` separates
@@ -70,12 +68,11 @@ the eventual Rust BLE backend.
 
 ## Next steps and open questions
 
-1. Find out why the unit stopped advertising after power-cycle.
-2. Measure polling reliability and diagnose intermittent disconnects.
-3. Compare telemetry with the display under a known load.
-4. Test saved-key persistence after power-cycle; reset/unbinding behavior
-   remains unknown.
-5. Port the validated BLE session, codec, and property model to Rust.
+1. Measure polling reliability and diagnose intermittent disconnects,
+   including multi-day advertising loss.
+2. Compare telemetry with the display under a known load.
+3. Reset/unbinding effect on the key remains unknown.
+4. Port the validated BLE session, codec, and property model to Rust.
 
 ## Housekeeping
 

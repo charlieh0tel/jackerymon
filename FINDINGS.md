@@ -214,6 +214,13 @@ the exact proximity interval was not timestamped. Eight reports used an
 all-zero address; their significance is unknown. Key persistence remains
 untested because discovery still fails before authentication.
 
+On 2026-10-10 the unit was advertising again; why BLE and Wi-Fi stopped
+is unknown. A saved-key `--status` read then succeeded with no login or
+cloud request, so the key survived the 2026-10-05 power-cycle. An
+immediate second read failed: two disconnects (one before the status
+request, one before it completed), then three-attempt exhaustion.
+Whether the phone app held a BLE connection at the time is unknown.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

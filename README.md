@@ -68,8 +68,8 @@ always closes its connection before retrying.
 Live validation: 60 polls on one connection in 313.4 seconds, zero transport
 failures, median query latency 216.2 ms (p95 303.4 ms). USB, AC, and light
 states matched the user's manual changes. Wi-Fi credentials were absent.
-Longer runs, power-cycle behavior, and independent load measurements remain
-to be tested.
+The saved key still worked after a power-cycle. Longer runs and independent
+load measurements remain to be tested.
 
 The status path verifies the advertised serial/address, subscribes to
 notifications, sends one read-device-info command, and prints the returned
@@ -89,8 +89,8 @@ Live status succeeded on the Explorer 2000 with the user-acquired key:
 and error code 0. The user removed Wi-Fi credentials before testing began;
 all these BLE tests used a unit without Wi-Fi connectivity. Three repeat
 status reads succeeded with the existing key and no retries.
-The status process made no cloud requests. Long-term key validity and
-behavior after power-cycle/reset/unbinding remain unverified. Cloud
+The status process made no cloud requests. The key survived a power-cycle;
+long-term validity and reset/unbinding behavior remain unverified. Cloud
 access is needed for the implemented key acquisition.
 
 Internally, `StatusSession` owns connection-loss notification and one
