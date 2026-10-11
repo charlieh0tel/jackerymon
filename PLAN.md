@@ -61,6 +61,12 @@ the eventual Rust BLE backend.
 - **BLE is the monitoring transport.** Focus development on the working
   Explorer BLE protocol. Design the Rust library around the validated
   session behavior; a generic multi-transport abstraction is not needed.
+- **BLE library: btleplug.** Chosen by the user over `bluer`. It covers
+  everything the PoC does (scan with manufacturer data, connect,
+  notify, write). Costs: generic errors hide BlueZ disconnect reasons
+  (use `btmon`/journal instead), no passive advertisement monitoring,
+  no adapter control. Keep BLE in one small module so a switch to
+  `bluer` stays cheap if disconnect diagnosis needs it.
 - **Property model follows the BLE wire keys.** Use a typed model for
   battery percentage, temperature, input/output power, and output states.
   Preserve unknown fields during research; do not invent battery-current
@@ -68,8 +74,10 @@ the eventual Rust BLE backend.
 
 ## Next steps and open questions
 
-1. Measure polling reliability and diagnose intermittent disconnects,
-   including multi-day advertising loss.
+1. Measure polling reliability and diagnose intermittent disconnects.
+   The unit sometimes turns its BLE/Wi-Fi radios off by itself; the
+   daemon must treat long absence as normal. Find what turns them off
+   and which button restores them.
 2. Compare telemetry with the display under a known load.
 3. Reset/unbinding effect on the key remains unknown.
 4. Port the validated BLE session, codec, and property model to Rust.

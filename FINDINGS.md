@@ -221,6 +221,18 @@ immediate second read failed: two disconnects (one before the status
 request, one before it completed), then three-attempt exhaustion.
 Whether the phone app held a BLE connection at the time is unknown.
 
+Minutes later a 60-sample poll found no advertisement in three scans
+(32.1 seconds). The user then saw the display on but the Wi-Fi and
+Bluetooth icons off; the unit had turned its radios off by itself,
+trigger unknown. The user pressed several buttons (which one restored
+the radios was not determined). A subsequent 60-sample poll
+completed in 325.8 seconds: two disconnects before the first status
+request, then all 60 samples on the third connection. Query latency:
+minimum 213.3 ms, median 216.0 ms, maximum 577.4 ms. Outputs off,
+`rb=100`, `ec=0`. Radio-off explains this "not found" failure. It may
+not explain the btmon case, when the user reported blinking icons.
+Either way the daemon must tolerate long absences.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
