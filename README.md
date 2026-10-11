@@ -79,8 +79,8 @@ cargo run --release -- tui --daemon http://127.0.0.1:9888
 
 `POST /settings` takes the unit's own one-key body (keys and values in
 `docs/protocol.md`, Control). Emergency charging needs `?confirm=true`.
-A request waits up to 60 s, including for the unit to come back; one
-still queued then is never sent. The API has no authentication and can
+A request waits up to 60 s in all, including for room in the queue and
+for the unit to come back; one still queued then is never sent. The API has no authentication and can
 switch outputs, so bind it beyond localhost only on a trusted network.
 
 Readings older than 60 s are left out of `/metrics`, so a unit that has
@@ -90,11 +90,14 @@ writes one `YYYY-MM-DD.jsonl` file per UTC day in the `poll` line format,
 about 10 MB a day at the default 5 s interval.
 
 `tui --daemon` follows the daemon instead of connecting to the unit, so
-the TUI and the daemon can run together. While the daemon runs, the
+the TUI and the daemon can run together. A replayed sample shows its real age,
+and one older than the chart's ten minutes is not charted. While the daemon runs, the
 phone app cannot connect.
 
 `contrib/systemd/` has a service unit and a tmpfiles rule that prunes
-logs after 30 days. Neither has been tested; check the unit's user,
+logs after 30 days. The daemon exits when polling fails for good, with
+the error, so systemd can restart it; on SIGINT or SIGTERM it closes
+`/events` streams rather than waiting for their clients. Neither has been tested; check the unit's user,
 group, and paths against your system before installing it.
 
 ## Python BLE PoC

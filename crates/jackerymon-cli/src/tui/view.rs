@@ -207,7 +207,7 @@ fn header_line(monitor: &Monitor, now: Instant) -> Line<'static> {
     let age = monitor.latest.as_ref().map_or_else(
         || Span::raw("no data yet"),
         |reading| {
-            let age = now.duration_since(reading.received);
+            let age = reading.age(now);
             let text = format!("updated {} ago", duration_text(age));
             if age > STALE_AFTER {
                 Span::styled(text, ALERT_COLOR)

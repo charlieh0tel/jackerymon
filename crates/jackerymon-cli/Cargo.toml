@@ -24,3 +24,6 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["test-util"] }

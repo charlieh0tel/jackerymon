@@ -136,6 +136,12 @@ Key bootstrap stays in Python.
   Readings older than 60 s are not exported, so Prometheus never shows
   stale values as live; `jackery_connected` and the last sample time are.
   The daemon holds the unit's only connection, locking out the phone app.
+- **Daemon lifecycle (Codex review, 2026-10-11).** Polling ending, by
+  signal or fatal error, stops HTTP too: `/events` streams close and the
+  daemon exits with the polling result, so systemd sees failures. A
+  setting's 60 s deadline covers queueing, so a full queue cannot hold a
+  request indefinitely. The TUI ages each sample by its own timestamp,
+  so an old sample replayed by the daemon does not look fresh.
 
 ## Next steps and open questions
 

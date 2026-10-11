@@ -36,9 +36,9 @@ use super::Shared;
 use super::metrics;
 use crate::record::Update;
 
-/// How long `POST /settings` waits, including for the unit to come back.
-/// A request still queued when this expires is never sent; one already
-/// sent may still take effect.
+/// How long `POST /settings` waits, including for room in the queue and
+/// for the unit to come back.  A request still queued when this expires
+/// is never sent; one already sent may still take effect.
 const SETTING_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Prometheus text exposition format, version 0.0.4.
@@ -75,8 +75,8 @@ async fn status(State(shared): State<Arc<Shared>>) -> Json<Value> {
 }
 
 /// Server-sent events, one [`Update`] each as JSON: first the current
-/// link state and latest sample, then every change.  A client that falls
-/// behind skips the updates it missed.
+/// link state and latest sample, then every change until polling ends.
+/// A client that falls behind skips the updates it missed.
 async fn events(
     State(shared): State<Arc<Shared>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -85,11 +85,14 @@ async fn events(
     let live = BroadcastStream::new(shared.updates.subscribe())
         .filter_map(|update| async move { update.ok() });
     let replay = shared.snapshot.lock().expect("snapshot lock").replay();
-    let updates = stream::iter(replay).chain(live).map(|update: Update| {
-        Ok(Event::default()
-            .json_data(&update)
-            .expect("updates serialize to JSON"))
-    });
+    let updates = stream::iter(replay)
+        .chain(live)
+        .take_until(shared.stopped())
+        .map(|update: Update| {
+            Ok(Event::default()
+                .json_data(&update)
+                .expect("updates serialize to JSON"))
+        });
     Sse::new(updates).keep_alive(KeepAlive::default())
 }
 
@@ -120,17 +123,19 @@ async fn settings(
         );
     }
     let (reply, answer) = oneshot::channel();
-    if shared
-        .commands
-        .send(ControlRequest { setting, reply })
-        .await
-        .is_err()
-    {
-        return error(StatusCode::SERVICE_UNAVAILABLE, "polling has stopped");
-    }
-    match timeout(SETTING_TIMEOUT, answer).await {
-        Ok(Ok(Ok(()))) => Json(json!({ "applied": setting.to_string() })).into_response(),
-        Ok(Ok(Err(control))) => {
+    // `None` once polling has stopped.
+    let answered = timeout(SETTING_TIMEOUT, async {
+        shared
+            .commands
+            .send(ControlRequest { setting, reply })
+            .await
+            .ok()?;
+        answer.await.ok()
+    })
+    .await;
+    match answered {
+        Ok(Some(Ok(()))) => Json(json!({ "applied": setting.to_string() })).into_response(),
+        Ok(Some(Err(control))) => {
             let code = match control {
                 ControlError::Rejected { .. } | ControlError::NotApplied(_) => {
                     StatusCode::UNPROCESSABLE_ENTITY
@@ -139,7 +144,7 @@ async fn settings(
             };
             error(code, &control.to_string())
         }
-        Ok(Err(_)) => error(StatusCode::SERVICE_UNAVAILABLE, "polling has stopped"),
+        Ok(None) => error(StatusCode::SERVICE_UNAVAILABLE, "polling has stopped"),
         Err(_) => error(
             StatusCode::GATEWAY_TIMEOUT,
             &format!("{setting}: no answer within {SETTING_TIMEOUT:?}; not sent if still queued"),
@@ -164,11 +169,21 @@ fn error(code: StatusCode, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use axum::Json;
+    use axum::extract::Query;
+    use axum::extract::State;
+    use axum::http::StatusCode;
     use jackerymon::control::Setting;
+    use jackerymon::poll::ControlRequest;
     use jackerymon::status::LightMode;
     use serde_json::json;
+    use tokio::sync::oneshot;
 
+    use super::SettingQuery;
     use super::parse_setting;
+    use super::settings;
+    use crate::daemon::COMMAND_BUFFER;
+    use crate::daemon::Shared;
 
     #[test]
     fn parses_one_key_bodies_only() {
@@ -178,5 +193,30 @@ mod tests {
         assert!(parse(json!({"lm": 1, "oac": 1})).is_err());
         assert!(parse(json!({"lm": "high"})).is_err());
         assert!(parse(json!({"lm": 9})).is_err());
+    }
+
+    /// With the unit away and the queue full, a request still times out
+    /// instead of waiting for room.
+    #[tokio::test(start_paused = true)]
+    async fn full_queue_counts_against_the_deadline() {
+        let (shared, _requests) = Shared::new("123456789".to_owned());
+        let light = Setting::Light(LightMode::Low);
+        for _ in 0..COMMAND_BUFFER {
+            let (reply, _) = oneshot::channel();
+            shared
+                .commands
+                .try_send(ControlRequest {
+                    setting: light,
+                    reply,
+                })
+                .expect("room");
+        }
+        let response = settings(
+            State(shared),
+            Query(SettingQuery { confirm: false }),
+            Json(json!({"lm": 1}).as_object().expect("object").clone()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
     }
 }

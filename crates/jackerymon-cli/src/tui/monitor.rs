@@ -2,7 +2,9 @@
 
 use std::collections::VecDeque;
 use std::time::Duration;
+use std::time::SystemTime;
 
+use chrono::DateTime;
 use jackerymon::control::Setting;
 use jackerymon::status::Status;
 use tokio::time::Instant;
@@ -46,6 +48,16 @@ pub(super) struct PowerPoint {
 pub(super) struct Reading {
     pub(super) status: Status,
     pub(super) received: Instant,
+    /// How old the sample already was on arrival: a daemon replays its
+    /// latest one to a new client, however old.
+    pub(super) age_on_arrival: Duration,
+}
+
+impl Reading {
+    /// Time since the unit was read.
+    pub(super) fn age(&self, now: Instant) -> Duration {
+        now.duration_since(self.received) + self.age_on_arrival
+    }
 }
 
 /// Everything the screen shows.
@@ -89,13 +101,17 @@ impl Monitor {
             Update::Sample(sample) if self.latest.is_some() && sample.sample == self.samples => {}
             Update::Sample(sample) => {
                 self.samples = sample.sample;
+                let age_on_arrival = age(&sample.timestamp, SystemTime::now());
                 match Status::try_from(sample.status) {
                     Ok(status) => {
-                        self.record_power(&status, now);
+                        if let Some(taken) = now.checked_sub(age_on_arrival) {
+                            self.record_power(&status, taken, now);
+                        }
                         self.invalid = None;
                         self.latest = Some(Reading {
                             status,
                             received: now,
+                            age_on_arrival,
                         });
                     }
                     Err(error) => self.invalid = Some(error.to_string()),
@@ -104,10 +120,12 @@ impl Monitor {
         }
     }
 
-    fn record_power(&mut self, status: &Status, now: Instant) {
+    /// Charts a reading taken at `taken`; one older than [`HISTORY`] is
+    /// dropped at once.
+    fn record_power(&mut self, status: &Status, taken: Instant, now: Instant) {
         if let (Some(input), Some(output)) = (status.input_watts, status.output_watts) {
             self.history.push_back(PowerPoint {
-                at: now,
+                at: taken,
                 input_watts: f64::from(input),
                 output_watts: f64::from(output),
             });
@@ -122,10 +140,24 @@ impl Monitor {
     }
 }
 
+/// How long before `now` a sample's RFC 3339 timestamp is.  An
+/// unreadable timestamp, or one ahead of this host's clock, counts as
+/// new.
+fn age(timestamp: &str, now: SystemTime) -> Duration {
+    DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .and_then(|taken| now.duration_since(SystemTime::from(taken)).ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use std::time::Duration;
+    use std::time::SystemTime;
 
+    use chrono::DateTime;
+    use chrono::SecondsFormat;
+    use chrono::Utc;
     use serde_json::Value;
     use serde_json::json;
     use tokio::time::Instant;
@@ -137,8 +169,12 @@ pub(super) mod tests {
     use crate::record::Update;
 
     pub(in crate::tui) fn sample(number: u64, status: Value) -> Update {
+        sample_taken(number, status, SystemTime::now())
+    }
+
+    fn sample_taken(number: u64, status: Value, taken: SystemTime) -> Update {
         Update::Sample(SampleRecord {
-            timestamp: "1970-01-01T00:00:00.000000+00:00".to_owned(),
+            timestamp: DateTime::<Utc>::from(taken).to_rfc3339_opts(SecondsFormat::Micros, false),
             sample: number,
             connection: 1,
             transport_failures: 0,
@@ -209,5 +245,19 @@ pub(super) mod tests {
         assert_eq!(monitor.history.len(), 1);
         monitor.apply(sample(1, json!({"ip": 2, "op": 2})), now);
         assert_eq!(monitor.history.len(), 2, "a restarted daemon counts from 1");
+    }
+
+    #[test]
+    fn replayed_old_sample_keeps_its_age() {
+        let now = Instant::now();
+        let old = Duration::from_secs(2 * 60 * 60);
+        let mut monitor = Monitor::new("123456789".to_owned());
+        monitor.apply(
+            sample_taken(7, json!({"ip": 1, "op": 1}), SystemTime::now() - old),
+            now,
+        );
+        let reading = monitor.latest.as_ref().expect("reading");
+        assert!(reading.age(now) >= old);
+        assert!(monitor.history.is_empty(), "too old to chart");
     }
 }
