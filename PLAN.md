@@ -34,7 +34,8 @@ cause unknown. The saved key then still worked: it survives power-cycle.
 The Rust library `crates/jackerymon` ports the codec, advertisement
 decoding, key-file loading, typed status, btleplug transport, and the
 poller from the PoC, with offline tests. `jackerymon poll` matched the
-PoC's live results on its first run. Key bootstrap stays in Python.
+PoC's live results on its first run, and `jackerymon tui` shows live
+status. Key bootstrap stays in Python.
 
 ## Decisions
 
@@ -103,8 +104,9 @@ PoC's live results on its first run. Key bootstrap stays in Python.
    keeps them on.
 2. Compare telemetry with the display under a known load.
 3. Reset/unbinding effect on the key remains unknown.
-4. TUI: battery, input/output power, temperature, output states, error
-   code, connection state, data age, power chart.
+4. Daemon: poll, log JSON lines, serve `/metrics` and HTTP JSON; point
+   the TUI at it.
+5. Control commands (outputs, light, settings).
 
 ## Housekeeping
 

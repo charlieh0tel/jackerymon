@@ -242,6 +242,13 @@ returned samples with about 220 ms query latency and the same fields
 as the PoC. Whether continuous polling keeps the radios on is not yet
 known.
 
+That Rust keep-alive ran 608 seconds: 113 samples, 4 connections, 7
+transport failures, all around 06:18 UTC; the longest gap between
+samples was about 15 seconds. Failures included `le-connection-abort-
+by-local` from BlueZ (btleplug passes that reason through) and one
+connect timeout. The radios stayed on throughout. `jackerymon tui`
+then connected and updated live.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
