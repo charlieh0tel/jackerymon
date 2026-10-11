@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use serde_json::Value;
 use serde_json::json;
 use thiserror::Error;
 
@@ -125,12 +126,20 @@ impl Setting {
         known.then_some(setting)
     }
 
+    /// The one-key body the unit takes, such as `{"lm":1}`; the inverse of
+    /// [`Setting::from_wire`].
+    #[must_use]
+    pub fn body(self) -> Value {
+        let (_, key, value) = self.wire();
+        json!({ key: value })
+    }
+
     pub(crate) fn request(self) -> Request {
-        let (action, key, value) = self.wire();
+        let (action, _, _) = self.wire();
         Request {
             action: Action(action),
             message_type: PROPERTY_CHANGE,
-            body: json!({ key: value }).to_string().into_bytes(),
+            body: self.body().to_string().into_bytes(),
         }
     }
 

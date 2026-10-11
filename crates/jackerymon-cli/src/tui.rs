@@ -46,10 +46,17 @@ const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 pub(crate) struct TuiArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
+    /// Follow a running `jackerymon daemon` at this URL instead of
+    /// connecting to the unit; the connection options are then unused.
+    #[arg(long, value_name = "URL")]
+    daemon: Option<String>,
 }
 
 pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
-    let mut source = source::direct(&arguments.connection).await?;
+    let mut source = match &arguments.daemon {
+        Some(url) => source::daemon(url).await?,
+        None => source::direct(&arguments.connection).await?,
+    };
     let mut monitor = Monitor::new(source.serial.clone());
     let mut terminal = ratatui::init();
     let shown = show(

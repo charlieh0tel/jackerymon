@@ -84,6 +84,9 @@ impl Monitor {
                 self.transport_failures += 1;
                 self.link = Link::Lost { error, consecutive };
             }
+            // A daemon replays its latest sample to a new client, which
+            // may then arrive twice.
+            Update::Sample(sample) if self.latest.is_some() && sample.sample == self.samples => {}
             Update::Sample(sample) => {
                 self.samples = sample.sample;
                 match Status::try_from(sample.status) {
@@ -195,5 +198,16 @@ pub(super) mod tests {
         monitor.apply(sample(2, json!({"ip": 2, "op": 2})), later);
         assert_eq!(monitor.history.len(), 1);
         assert_eq!(monitor.history[0].input_watts, 2.0);
+    }
+
+    #[test]
+    fn replayed_sample_is_not_counted_twice() {
+        let now = Instant::now();
+        let mut monitor = Monitor::new("123456789".to_owned());
+        monitor.apply(sample(7, json!({"ip": 1, "op": 1})), now);
+        monitor.apply(sample(7, json!({"ip": 1, "op": 1})), now);
+        assert_eq!(monitor.history.len(), 1);
+        monitor.apply(sample(1, json!({"ip": 2, "op": 2})), now);
+        assert_eq!(monitor.history.len(), 2, "a restarted daemon counts from 1");
     }
 }
