@@ -95,6 +95,19 @@ status. Key bootstrap stays in Python.
 - **Key bootstrap stays in Python.** The cloud login is a one-time step;
   porting it buys nothing yet.
 
+- **Control v1 scope.** AC/DC outputs, light, screen, auto-off and
+  energy-saving timers, charge speed, battery protection, super charge,
+  and UPS mode. Only these decoded commands can be sent; reboot and power
+  off cannot. A command counts as applied only after a status read shows
+  the new value, not on the echo alone. Commands share the poller's
+  connection and never overlap a status query.
+- **Confirmation before cutting power.** The TUI asks y/n before turning
+  an output off; `jackerymon set` requires `--yes` for that.
+- **TUI control is a settings menu.** One key opens a menu of every
+  control; arrows and Enter choose.
+- **Key bootstrap path unrecorded.** The 2026-10-04 key came from either
+  `device/bluetoothKey` or `--bind`; the user does not remember which.
+
 ## Next steps and open questions
 
 1. Measure polling reliability and diagnose intermittent disconnects.

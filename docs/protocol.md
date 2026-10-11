@@ -228,10 +228,38 @@ BLE message id -> meaning (cloud message name where one exists):
 
 - 6 read device info (`QueryDeviceProperty`)
 - output toggles: AC, DC, DC car, DC USB; AC 240; output priority
-- 18 screen, light, 19 auto-shutdown
+- 17 light, 18 screen, 19 auto-shutdown, 20 energy saving
 - 21 charge, 22 battery, 23 super-charge, 24 UPS, 25 time zone
 - 26-30 charge/discharge plans (`*ElectricityStrategy`)
 - 42/43 TOU peaks/troughs (`TOUSchedule`, `QueryTOUSchedule`)
 - 45 reboot (`DeviceReboot`), 46 power off
 - 50 sync MQTT connect info, 51 read sub-device CT, 52 Wi-Fi config
 - Wi-Fi read/write, OTA page/version
+
+### Control
+
+Settings use the read frame with message type 4 and a JSON body of one
+key (`PortableControlFormat.java`, `lc/a.java`, `cmd/portable/b.java`):
+
+| Action | Body | Values |
+|---|---|---|
+| 10 | `odc` | DC output 0/1 |
+| 11 | `odcu` | USB output 0/1 (split-DC models) |
+| 12 | `odcc` | car output 0/1 (split-DC models) |
+| 13 | `oac` | AC output 0/1 |
+| 17 | `lm` | light 0 off, 1 low, 2 high, 3 SOS |
+| 18 | `slt` | screen; reported back as `sltb` |
+| 19 | `ast` | auto-off minutes, 0 never |
+| 20 | `pm` | energy saving minutes, 0 never |
+| 21 | `cs` | charge speed |
+| 22 | `lps` | battery protection |
+| 23 | `sfc` | super charge |
+| 24 | `ups` | UPS mode |
+
+Live (2026-10-11): `{"lm":1}` on action 17 was acknowledged in about
+90 ms by a frame with the same action, type 4, result code 0, and the
+request body echoed. About 220 ms later an unsolicited action-0, type-4
+frame reported the change it caused, `{"op":1}` (the light draws 1 W).
+A status read then showed `lm=1`; `{"lm":0}` behaved the same way,
+pushing `{"op":0}`. The status decoder already skips action 0, so pushes
+cannot be mistaken for a status response.

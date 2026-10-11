@@ -249,6 +249,16 @@ by-local` from BlueZ (btleplug passes that reason through) and one
 connect timeout. The radios stayed on throughout. `jackerymon tui`
 then connected and updated live.
 
+## Control (2026-10-11)
+
+Light control works over BLE with the saved key. Sending `{"lm":1}` and
+then `{"lm":0}` on action 17, message type 4, turned the light on and
+off. Each was acknowledged by an echo on the same action with result 0
+within about 90 ms, followed by an unsolicited action-0 property push
+(`{"op":1}`, then `{"op":0}`). Status reads confirmed `lm`. A first
+attempt was cut short by a logging bug after the light came on; the
+rerun turned it off. Details are in docs/protocol.md.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
