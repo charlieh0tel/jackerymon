@@ -33,7 +33,8 @@ pub(crate) struct SetArgs {
     connection: ConnectionArgs,
     /// Confirm a risky setting: turning an output off, which cuts power to
     /// its loads, or turning emergency charging on.
-    #[arg(long)]
+    // Global so it may follow the setting: `set ac off --yes`.
+    #[arg(long, global = true)]
     yes: bool,
     #[command(subcommand)]
     setting: SettingArgs,

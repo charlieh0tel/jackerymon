@@ -11,20 +11,21 @@ use jackerymon::poll::PollConfig;
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// Which unit to reach, and how patiently.
+/// Which unit to reach, and how patiently.  Global, so these may also
+/// follow a `set` setting.
 #[derive(Args)]
 pub(crate) struct ConnectionArgs {
     /// Key file written by `tools/jackery_key.py`.
-    #[arg(long, default_value = "jackery-key.json")]
+    #[arg(long, global = true, default_value = "jackery-key.json")]
     key_file: PathBuf,
     /// BLE address, overriding the key file's.
-    #[arg(long)]
+    #[arg(long, global = true)]
     address: Option<String>,
     /// Seconds allowed for discovery, connection, and each query.
-    #[arg(long, default_value_t = 10.0, value_parser = positive_seconds)]
+    #[arg(long, global = true, default_value_t = 10.0, value_parser = positive_seconds)]
     timeout: f64,
     /// Seconds between a response and the next request.
-    #[arg(long, default_value_t = 5.0, value_parser = positive_seconds)]
+    #[arg(long, global = true, default_value_t = 5.0, value_parser = positive_seconds)]
     interval: f64,
 }
 
