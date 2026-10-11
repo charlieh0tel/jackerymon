@@ -267,13 +267,19 @@ Setting it off, the unit disconnected before confirmation, so the TUI
 reported a connection failure; after reconnecting about 6 seconds later,
 status showed the light off. A reported transport failure therefore
 does not mean the setting was not applied; the next status is the
-truth.
+truth. During that run the unit was charging at 774-929 W input.
 
 Custom charging is silently refused on the test unit: `cs=2` and
 `csc=500` were each acknowledged with result 0 and a body of `{"cs":0}`,
 and status stayed `cs=0`. Restoring `cs=0` changed nothing. Pushes
 showed `acip` tracking `ip` while charging from AC (264-477 W) until the
-battery reached 100%. During that run the unit was charging at 774-929 W input.
+battery reached 100%.
+
+AC control works: `jackerymon set ac on` was confirmed in 6.0 seconds
+(`oac=1`, `acov=1223`, 59 Hz) and `set --yes ac off` in 4.0 seconds
+(`oac=0`, `acov=0`, `acohz=0`), with nothing plugged into AC. DC on and
+the light on high, seen in the same status reads, were set by the user
+from the TUI menu.
 
 ## Open questions
 
