@@ -1,14 +1,14 @@
 //! `jackerymon tui`: live status on one screen.
 //!
-//! The screen consumes poll events from a channel, not BLE, so a daemon
-//! can feed it later without changes here.
+//! The screen consumes updates from a [`source::Source`], not BLE, so a
+//! daemon can feed it as well.
 
 mod menu;
 mod monitor;
+mod source;
 mod view;
 
 use std::future::pending;
-use std::ops::ControlFlow;
 use std::pin::pin;
 use std::time::Duration;
 
@@ -22,10 +22,7 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use futures::StreamExt;
-use jackerymon::ble;
-use jackerymon::control::ControlError;
 use jackerymon::control::Setting;
-use jackerymon::poll::ControlRequest;
 use ratatui::DefaultTerminal;
 use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
@@ -40,6 +37,7 @@ use crate::tui::menu::Menu;
 use crate::tui::menu::controls;
 use crate::tui::monitor::ControlState;
 use crate::tui::monitor::Monitor;
+use crate::tui::source::Command;
 
 /// Redraw at least this often so the data age stays current.
 const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
@@ -51,53 +49,30 @@ pub(crate) struct TuiArgs {
 }
 
 pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
-    let key_file = arguments.connection.key_file()?;
-    let mut monitor = Monitor::new(key_file.serial.to_string());
-    // A monitor keeps trying while the unit's radio is off.
-    let config = arguments.connection.poll_config(None);
-    let adapter = ble::default_adapter().await?;
-    let (sender, mut events) = mpsc::unbounded_channel();
-    // One setting at a time; the screen refuses another while one runs.
-    let (commands, requests) = mpsc::channel(1);
-    let (stop, stopped) = oneshot::channel::<()>();
-    let poller = tokio::spawn(ble::poll(
-        adapter,
-        key_file,
-        config,
-        Some(requests),
-        async {
-            // A dropped sender also means stop.
-            stopped.await.ok();
-        },
-        move |event| {
-            if sender.send(Update::from(event)).is_ok() {
-                ControlFlow::Continue(())
-            } else {
-                ControlFlow::Break(())
-            }
-        },
-    ));
+    let mut source = source::direct(&arguments.connection).await?;
+    let mut monitor = Monitor::new(source.serial.clone());
     let mut terminal = ratatui::init();
-    let shown = show(&mut terminal, &mut monitor, &mut events, &commands).await;
+    let shown = show(
+        &mut terminal,
+        &mut monitor,
+        &mut source.updates,
+        &source.commands,
+    )
+    .await;
     ratatui::restore();
-    // The poller may already have ended, closing the receiver.
-    stop.send(()).ok();
-    poller
-        .await
-        .context("poller task failed")?
-        .context("polling failed")?;
+    source.finish().await?;
     shown
 }
 
 /// The setting in progress, if any, and where its answer arrives.
-type InProgress = Option<(Setting, oneshot::Receiver<Result<(), ControlError>>)>;
+type InProgress = Option<(Setting, oneshot::Receiver<Result<(), String>>)>;
 
 /// Draws until the user quits or the poller ends.
 async fn show(
     terminal: &mut DefaultTerminal,
     monitor: &mut Monitor,
     events: &mut mpsc::UnboundedReceiver<Update>,
-    commands: &mpsc::Sender<ControlRequest>,
+    commands: &mpsc::Sender<Command>,
 ) -> Result<()> {
     let controls = controls();
     let mut menu = Menu::Closed;
@@ -136,7 +111,7 @@ async fn show(
                 in_progress = None;
                 monitor.control = Some(match answer {
                     Ok(Ok(())) => ControlState::Applied(setting),
-                    Ok(Err(error)) => ControlState::Failed(error.to_string()),
+                    Ok(Err(error)) => ControlState::Failed(error),
                     Err(_) => ControlState::Failed("polling stopped".to_owned()),
                 });
             }
@@ -158,7 +133,7 @@ fn is_quit(key: KeyEvent, menu: Menu) -> bool {
 /// Queues `setting` for the poller unless one is already in progress.
 fn request(
     setting: Setting,
-    commands: &mpsc::Sender<ControlRequest>,
+    commands: &mpsc::Sender<Command>,
     in_progress: &mut InProgress,
     monitor: &mut Monitor,
 ) {
@@ -169,7 +144,7 @@ fn request(
         return;
     }
     let (reply, answer) = oneshot::channel();
-    monitor.control = Some(match commands.try_send(ControlRequest { setting, reply }) {
+    monitor.control = Some(match commands.try_send(Command { setting, reply }) {
         Ok(()) => {
             *in_progress = Some((setting, answer));
             ControlState::Pending(setting)
@@ -179,9 +154,7 @@ fn request(
 }
 
 /// The answer for the setting in progress; never resolves without one.
-async fn wait(
-    in_progress: &mut InProgress,
-) -> (Setting, Result<Result<(), ControlError>, RecvError>) {
+async fn wait(in_progress: &mut InProgress) -> (Setting, Result<Result<(), String>, RecvError>) {
     match in_progress {
         Some((setting, answer)) => (*setting, answer.await),
         None => pending().await,
