@@ -98,6 +98,64 @@ impl From<i64> for BatteryProtection {
     }
 }
 
+/// `sltb`: the app's screen setting.  0 selects nothing in the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenMode {
+    Off,
+    /// "Shortly on": two minutes.
+    Brief,
+    /// "Steady on": two hours.
+    Steady,
+    Unknown(i64),
+}
+
+impl From<i64> for ScreenMode {
+    fn from(value: i64) -> Self {
+        match value {
+            1 => Self::Off,
+            2 => Self::Brief,
+            3 => Self::Steady,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// `ta`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemperatureAlarm {
+    None,
+    High,
+    Low,
+    Unknown(i64),
+}
+
+impl From<i64> for TemperatureAlarm {
+    fn from(value: i64) -> Self {
+        match value {
+            0 => Self::None,
+            1 => Self::High,
+            2 => Self::Low,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// A setting in minutes where 0 means never (`ast`, `pm`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OffTimer {
+    Never,
+    Minutes(u32),
+}
+
+impl From<u32> for OffTimer {
+    fn from(minutes: u32) -> Self {
+        match minutes {
+            0 => Self::Never,
+            minutes => Self::Minutes(minutes),
+        }
+    }
+}
+
 /// One status response.  A field is `None` when the unit omits its key;
 /// some models never send some keys (the Explorer 2000 reports DC output
 /// only as `odc`).
@@ -137,8 +195,20 @@ pub struct Status {
     /// `ups`
     pub ups: Option<bool>,
     pub battery_protection: Option<BatteryProtection>,
-    /// `ec`; 0 means no error.
+    /// `ec`; 0 means no error, n shows as fault F(n-1) in the app.
     pub error_code: Option<i64>,
+    /// `cip`
+    pub car_input_watts: Option<u32>,
+    /// `acpsp`; the app adds it to `cip` as DC input.
+    pub solar_input_watts: Option<f64>,
+    /// `ast`: power off after this long under light load on battery.
+    pub auto_off: Option<OffTimer>,
+    /// `pm`: turn outputs off after this long at no or light load.
+    pub energy_saving: Option<OffTimer>,
+    pub screen: Option<ScreenMode>,
+    /// `sfc`: one-shot fast charge.
+    pub super_charge: Option<bool>,
+    pub temperature_alarm: Option<TemperatureAlarm>,
     /// Every field as received, including undocumented ones.
     pub raw: RawStatus,
 }
@@ -168,6 +238,13 @@ impl TryFrom<RawStatus> for Status {
             ups: flag(&raw, "ups")?,
             battery_protection: integer::<i64>(&raw, "lps")?.map(BatteryProtection::from),
             error_code: integer(&raw, "ec")?,
+            car_input_watts: integer(&raw, "cip")?,
+            solar_input_watts: tenths(&raw, "acpsp")?,
+            auto_off: integer::<u32>(&raw, "ast")?.map(OffTimer::from),
+            energy_saving: integer::<u32>(&raw, "pm")?.map(OffTimer::from),
+            screen: integer::<i64>(&raw, "sltb")?.map(ScreenMode::from),
+            super_charge: flag(&raw, "sfc")?,
+            temperature_alarm: integer::<i64>(&raw, "ta")?.map(TemperatureAlarm::from),
             raw,
         })
     }
@@ -210,8 +287,11 @@ mod tests {
 
     use super::BatteryState;
     use super::LightMode;
+    use super::OffTimer;
+    use super::ScreenMode;
     use super::Status;
     use super::StatusError;
+    use super::TemperatureAlarm;
 
     fn parse(value: serde_json::Value) -> Result<Status, StatusError> {
         Status::try_from(value.as_object().expect("object").clone())
@@ -250,6 +330,23 @@ mod tests {
         assert_eq!(status.battery_celsius, Some(27.9));
         assert_eq!(status.output_hours_remaining, Some(99.9));
         assert_eq!(status.light_mode, Some(LightMode::Off));
+        assert_eq!(status.auto_off, Some(OffTimer::Minutes(120)));
+        assert_eq!(status.energy_saving, Some(OffTimer::Minutes(720)));
+        assert_eq!(status.screen, Some(ScreenMode::Off));
+        assert_eq!(status.super_charge, Some(false));
+        assert_eq!(status.temperature_alarm, Some(TemperatureAlarm::None));
+        assert_eq!(status.solar_input_watts, Some(0.0));
+    }
+
+    #[test]
+    fn decodes_settings_and_alarms() {
+        let status = parse(json!({"ast": 0, "pm": 1440, "sltb": 3, "ta": 1, "acpsp": 1234}))
+            .expect("valid status");
+        assert_eq!(status.auto_off, Some(OffTimer::Never));
+        assert_eq!(status.energy_saving, Some(OffTimer::Minutes(1440)));
+        assert_eq!(status.screen, Some(ScreenMode::Steady));
+        assert_eq!(status.temperature_alarm, Some(TemperatureAlarm::High));
+        assert_eq!(status.solar_input_watts, Some(123.4));
     }
 
     #[test]

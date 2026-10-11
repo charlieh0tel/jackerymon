@@ -26,7 +26,31 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `cs` | charge speed | 0 fast, 1 mute |
 | `ups` | UPS mode | 0/1 |
 | `lps` | battery protection | 0 full, 1 eco |
-| `ec` | error code | |
+| `ec` | error code; app shows n as fault F(n-1) | 0 none |
+| `cip` | car (12 V) input power | W |
+| `acpsp` | solar (MPPT) input power; app adds it to `cip` as DC input | /10 -> W |
+| `acpss` | solar input present; app shows MPPT icon when nonzero | |
+| `acip` | AC input present; app shows AC icon when nonzero | |
+| `ast` | auto power-off under light load on battery | min, 0 never |
+| `pm` | energy saving: outputs off at no/light load | min, 0 never |
+| `pmb` | energy saving active; app shows low-power icon when nonzero | |
+| `sltb` | screen setting | 1 off, 2 on 2 min, 3 on 2 h |
+| `sfc` | super charge (one-shot fast charge) | 0/1 |
+| `pal` | parallel/expansion battery; app shows merge icon at 2 | |
+| `ta` | temperature alarm | 0 none, 1 high, 2 low |
+
+Keys from `ec` down were decoded from the app 2.4.2
+(`PortableBody.java`, `PortablePanelActivity.java`,
+`PortableSettingActivity.java`, `lc/a.java`, `ab/o6.java`, layout
+`panel_activity_portable.xml`); `it` is shown /10 as hours there too.
+App option lists for model 12 (`rb/k.java`, "E2000Pro2"): `ast` 120,
+480, 720, 1440, never; `pm` 120, 480, 720, 1440, never. The test unit
+reported `ast=120`, `pm=720`, `sltb` 1 or 2, all others 0.
+
+The app has a "Bluetooth/Wi-Fi auto-off" setting (key `tmt`, command 44,
+`SETTING_BLUETOOTH_MODULE_SLEEP_TIME`), but hides it for model 12
+(`w0()` is false) and the unit does not report `tmt`. Whether this
+firmware has a fixed radio timeout is unknown.
 
 Some models combine DC output into `odc`; others split `odcu`/`odcc`.
 On the test Explorer 2000, enabling USB, AC, and the light manually
