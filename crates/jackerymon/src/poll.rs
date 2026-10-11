@@ -313,6 +313,11 @@ async fn apply<L: Link>(
     unverified: &mut Option<ControlRequest>,
 ) -> Result<ControlFlow<()>, BleError> {
     let setting = request.setting;
+    // A requester that gave up, such as a timed-out HTTP client, must not
+    // have its setting applied later.
+    if request.reply.is_closed() {
+        return Ok(ControlFlow::Continue(()));
+    }
     match link.exchange(&setting.request(), config.timeout).await {
         Ok(_echo) => {}
         Err(BleError::Decode(DecodeError::Device { code, .. })) => {
@@ -745,5 +750,37 @@ mod tests {
         .await;
         assert!(matches!(reply, Err(ControlError::Transport { .. })));
         assert!(matches!(result, Err(PollError::TooManyFailures { .. })));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandoned_setting_is_not_sent() {
+        let script = Script::default();
+        script
+            .steps
+            .borrow_mut()
+            .extend([Step::Status(100), Step::Status(99)]);
+        let (sender, receiver) = mpsc::channel(1);
+        let (reply, answer) = oneshot::channel();
+        drop(answer);
+        sender
+            .send(ControlRequest {
+                setting: LIGHT,
+                reply,
+            })
+            .await
+            .expect("queued");
+        let result = poll_with(
+            script.clone(),
+            config(),
+            Some(receiver),
+            pending(),
+            |event| match event {
+                PollEvent::Sample(sample) if sample.sample == 2 => ControlFlow::Break(()),
+                _ => ControlFlow::Continue(()),
+            },
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(*script.actions.borrow(), [6, 6]);
     }
 }

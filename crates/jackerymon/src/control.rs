@@ -85,6 +85,46 @@ impl Setting {
         }
     }
 
+    /// Parses a body key and value as [`Display`](fmt::Display) prints
+    /// them (`lm=1`), the same one-key form the unit takes.  Only values
+    /// the unit documents are accepted: no `Unknown` variants.
+    #[must_use]
+    pub fn from_wire(key: &str, value: i64) -> Option<Self> {
+        let switch = || match value {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        };
+        let timer = || {
+            let timer = OffTimer::from(u32::try_from(value).ok()?);
+            OFF_TIMER_CHOICES.contains(&timer).then_some(timer)
+        };
+        let setting = match key {
+            "oac" => Self::AcOutput(switch()?),
+            "odc" => Self::DcOutput(switch()?),
+            "lm" => Self::Light(LightMode::from(value)),
+            "slt" => Self::Screen(
+                [ScreenMode::Off, ScreenMode::Brief, ScreenMode::Steady]
+                    .into_iter()
+                    .find(|mode| mode.minutes() == value)?,
+            ),
+            "ast" => Self::AutoOff(timer()?),
+            "pm" => Self::EnergySaving(timer()?),
+            "cs" => Self::ChargeSpeed(ChargeSpeed::from(value)),
+            "lps" => Self::BatteryProtection(BatteryProtection::from(value)),
+            "sfc" => Self::EmergencyCharge(switch()?),
+            "ups" => Self::Ups(switch()?),
+            _ => return None,
+        };
+        let known = !matches!(
+            setting,
+            Self::Light(LightMode::Unknown(_))
+                | Self::ChargeSpeed(ChargeSpeed::Unknown(_) | ChargeSpeed::Custom)
+                | Self::BatteryProtection(BatteryProtection::Unknown(_))
+        );
+        known.then_some(setting)
+    }
+
     pub(crate) fn request(self) -> Request {
         let (action, key, value) = self.wire();
         Request {
@@ -127,6 +167,8 @@ mod tests {
     use super::Setting;
     use crate::cipher::rc4;
     use crate::identity::BleKey;
+    use crate::status::BatteryProtection;
+    use crate::status::ChargeSpeed;
     use crate::status::LightMode;
     use crate::status::OffTimer;
     use crate::status::ScreenMode;
@@ -164,6 +206,41 @@ mod tests {
         assert_eq!(setting.to_string(), "ast=0");
         assert!(setting.applied(&status(json!({"ast": 0}))));
         assert!(!setting.applied(&status(json!({}))));
+    }
+
+    #[test]
+    fn wire_form_round_trips() {
+        for setting in [
+            Setting::AcOutput(true),
+            Setting::DcOutput(false),
+            Setting::Light(LightMode::Sos),
+            Setting::Screen(ScreenMode::Steady),
+            Setting::AutoOff(OffTimer::Never),
+            Setting::EnergySaving(OffTimer::Minutes(720)),
+            Setting::ChargeSpeed(ChargeSpeed::Quiet),
+            Setting::BatteryProtection(BatteryProtection::Eco),
+            Setting::EmergencyCharge(true),
+            Setting::Ups(false),
+        ] {
+            let text = setting.to_string();
+            let (key, value) = text.split_once('=').expect("key=value");
+            let value = value.parse().expect("integer");
+            assert_eq!(Setting::from_wire(key, value), Some(setting), "{text}");
+        }
+    }
+
+    #[test]
+    fn wire_form_rejects_undocumented_values() {
+        for (key, value) in [
+            ("oac", 2),
+            ("lm", 9),
+            ("slt", 5),
+            ("ast", 90),
+            ("cs", 2),
+            ("xyz", 1),
+        ] {
+            assert_eq!(Setting::from_wire(key, value), None, "{key}={value}");
+        }
     }
 
     #[test]

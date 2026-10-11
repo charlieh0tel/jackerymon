@@ -1,6 +1,7 @@
 //! `jackerymon`: monitor a Jackery Explorer directly over BLE.
 
 mod connection;
+mod daemon;
 mod poll;
 mod record;
 mod set;
@@ -10,6 +11,7 @@ use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
 
+use crate::daemon::DaemonArgs;
 use crate::poll::PollArgs;
 use crate::set::SetArgs;
 use crate::tui::TuiArgs;
@@ -30,6 +32,9 @@ enum Command {
     Tui(TuiArgs),
     /// Change one setting and confirm it with a status read.
     Set(SetArgs),
+    /// Own the BLE connection; serve status, metrics, live updates, and
+    /// settings over HTTP.
+    Daemon(DaemonArgs),
 }
 
 #[tokio::main]
@@ -38,5 +43,6 @@ async fn main() -> Result<()> {
         Command::Poll(arguments) => poll::run(arguments).await,
         Command::Tui(arguments) => tui::run(arguments).await,
         Command::Set(arguments) => set::run(arguments).await,
+        Command::Daemon(arguments) => daemon::run(arguments).await,
     }
 }
