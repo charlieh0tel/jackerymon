@@ -114,8 +114,9 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
   for model 12, the unit reports none of those keys, and a live test
   showed the firmware acknowledging `cs=2` and `csc` without applying
   them.
-- **TUI control is a settings menu.** One key opens a menu of every
-  control; arrows and Enter choose.
+- **TUI control is a settings menu.** `m` opens one list of every
+  control; ←/→ cycles the selected value and Enter applies it, keeping the
+  menu open. No second pop-up: the user found the two-level menu clumsy.
 - **Key bootstrap path unrecorded.** The 2026-10-04 key came from either
   `device/bluetoothKey` or `--bind`; the user does not remember which.
 

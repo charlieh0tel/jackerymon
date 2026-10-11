@@ -1,5 +1,5 @@
-//! The settings menu: pick a control, pick a value, confirm if it cuts
-//! power.
+//! The settings menu: one list; ←/→ cycles the selected row's value,
+//! Enter applies it, and a risky value asks y/n inside the same box.
 
 use crossterm::event::KeyCode;
 use jackerymon::control::OFF_TIMER_CHOICES;
@@ -89,16 +89,13 @@ pub(super) fn controls() -> Vec<Control> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Menu {
     Closed,
-    /// Choosing a control.
-    Controls {
+    /// Row `row` selected; `choice` is a value picked with ←/→ but not
+    /// yet applied.
+    Open {
         row: usize,
+        choice: Option<usize>,
     },
-    /// Choosing a value for control `row`.
-    Choices {
-        row: usize,
-        choice: usize,
-    },
-    /// Asking before a setting with a warning.
+    /// Asking before applying a setting with a warning.
     Confirm {
         row: usize,
         choice: usize,
@@ -113,64 +110,75 @@ impl Menu {
         controls: &[Control],
         status: Option<&Status>,
     ) -> Option<Setting> {
+        let shown =
+            |row: usize, choice: Option<usize>| choice.or_else(|| controls[row].current(status));
         let (next, chosen) = match (*self, key) {
-            (Self::Closed, KeyCode::Char('m')) => (Self::Controls { row: 0 }, None),
-            (Self::Controls { row }, KeyCode::Up) => (
-                Self::Controls {
-                    row: previous(row, controls.len()),
+            (Self::Closed, KeyCode::Char('m')) => (
+                Self::Open {
+                    row: 0,
+                    choice: None,
                 },
                 None,
             ),
-            (Self::Controls { row }, KeyCode::Down) => (
-                Self::Controls {
-                    row: next(row, controls.len()),
-                },
-                None,
-            ),
-            (Self::Controls { row }, KeyCode::Enter | KeyCode::Right) => {
-                let choice = controls[row].current(status).unwrap_or(0);
-                (Self::Choices { row, choice }, None)
+            // Moving discards a value that was not applied.
+            (Self::Open { row, .. }, KeyCode::Up) => {
+                let row = previous(row, controls.len());
+                (Self::Open { row, choice: None }, None)
             }
-            (Self::Controls { .. }, KeyCode::Esc | KeyCode::Left | KeyCode::Char('m')) => {
-                (Self::Closed, None)
+            (Self::Open { row, .. }, KeyCode::Down) => {
+                let row = next(row, controls.len());
+                (Self::Open { row, choice: None }, None)
             }
-            (Self::Choices { row, choice }, KeyCode::Up) => {
+            (Self::Open { row, choice }, KeyCode::Left | KeyCode::Right) => {
                 let count = controls[row].choices.len();
+                let choice = match (shown(row, choice), key) {
+                    (Some(index), KeyCode::Left) => previous(index, count),
+                    (Some(index), _) => next(index, count),
+                    (None, _) => 0,
+                };
                 (
-                    Self::Choices {
+                    Self::Open {
                         row,
-                        choice: previous(choice, count),
+                        choice: Some(choice),
                     },
                     None,
                 )
             }
-            (Self::Choices { row, choice }, KeyCode::Down) => {
-                let count = controls[row].choices.len();
-                (
-                    Self::Choices {
-                        row,
-                        choice: next(choice, count),
-                    },
-                    None,
-                )
-            }
-            (Self::Choices { row, choice }, KeyCode::Enter) => {
+            (
+                Self::Open {
+                    row,
+                    choice: Some(choice),
+                },
+                KeyCode::Enter,
+            ) => {
                 let setting = controls[row].choices[choice];
                 if setting.warning().is_some() {
                     (Self::Confirm { row, choice }, None)
                 } else {
-                    (Self::Closed, Some(setting))
+                    (Self::Open { row, choice: None }, Some(setting))
                 }
             }
-            (Self::Choices { row, .. }, KeyCode::Esc | KeyCode::Left) => {
-                (Self::Controls { row }, None)
+            (
+                Self::Open {
+                    row,
+                    choice: Some(_),
+                },
+                KeyCode::Esc,
+            ) => (Self::Open { row, choice: None }, None),
+            (Self::Open { choice: None, .. }, KeyCode::Esc | KeyCode::Char('m')) => {
+                (Self::Closed, None)
             }
-            (Self::Confirm { row, choice }, KeyCode::Char('y')) => {
-                (Self::Closed, Some(controls[row].choices[choice]))
-            }
-            (Self::Confirm { row, choice }, KeyCode::Char('n') | KeyCode::Esc) => {
-                (Self::Choices { row, choice }, None)
-            }
+            (Self::Confirm { row, choice }, KeyCode::Char('y')) => (
+                Self::Open { row, choice: None },
+                Some(controls[row].choices[choice]),
+            ),
+            (Self::Confirm { row, choice }, KeyCode::Char('n') | KeyCode::Esc) => (
+                Self::Open {
+                    row,
+                    choice: Some(choice),
+                },
+                None,
+            ),
             (unchanged, _) => (unchanged, None),
         };
         *self = next;
@@ -204,73 +212,100 @@ mod tests {
             .last()
     }
 
+    fn row_of(setting: Setting) -> usize {
+        controls()
+            .iter()
+            .position(|control| control.choices.contains(&setting))
+            .expect("row")
+    }
+
     #[test]
-    fn choosing_light_starts_at_current_value() {
+    fn arrows_cycle_from_current_value_and_enter_applies() {
         let status = Status::try_from(json!({"lm": 1}).as_object().expect("object").clone())
             .expect("status");
         let mut menu = Menu::Closed;
-        let chosen = press(
-            &mut menu,
-            &[
-                KeyCode::Char('m'),
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Enter,
-                KeyCode::Down,
-                KeyCode::Enter,
-            ],
-            Some(&status),
+        let keys = [
+            KeyCode::Char('m'),
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Right,
+        ];
+        assert_eq!(press(&mut menu, &keys, Some(&status)), None);
+        assert_eq!(
+            menu,
+            Menu::Open {
+                row: 2,
+                choice: Some(2)
+            }
         );
+        let chosen = press(&mut menu, &[KeyCode::Enter], Some(&status));
         assert_eq!(chosen, Some(Setting::Light(LightMode::High)));
-        assert_eq!(menu, Menu::Closed);
+        assert_eq!(
+            menu,
+            Menu::Open {
+                row: 2,
+                choice: None
+            },
+            "menu stays open"
+        );
     }
 
     #[test]
     fn outputs_apply_without_confirmation() {
         let mut menu = Menu::Closed;
-        let keys = [
-            KeyCode::Char('m'),
-            KeyCode::Enter,
-            KeyCode::Down,
-            KeyCode::Enter,
-        ];
-        assert_eq!(
-            press(&mut menu, &keys, None),
-            Some(Setting::AcOutput(false))
-        );
-        assert_eq!(menu, Menu::Closed);
+        let keys = [KeyCode::Char('m'), KeyCode::Right, KeyCode::Enter];
+        assert_eq!(press(&mut menu, &keys, None), Some(Setting::AcOutput(true)));
     }
 
     #[test]
     fn emergency_charge_needs_confirmation() {
-        let row = controls()
-            .iter()
-            .position(|control| control.choices.contains(&Setting::EmergencyCharge(true)))
-            .expect("emergency charge row");
-        let mut menu = Menu::Choices { row, choice: 0 };
+        let row = row_of(Setting::EmergencyCharge(true));
+        let mut menu = Menu::Open {
+            row,
+            choice: Some(0),
+        };
         assert_eq!(press(&mut menu, &[KeyCode::Enter], None), None);
         assert_eq!(menu, Menu::Confirm { row, choice: 0 });
         assert_eq!(press(&mut menu, &[KeyCode::Char('n')], None), None);
-        assert_eq!(menu, Menu::Choices { row, choice: 0 });
+        assert_eq!(
+            menu,
+            Menu::Open {
+                row,
+                choice: Some(0)
+            }
+        );
         let chosen = press(&mut menu, &[KeyCode::Enter, KeyCode::Char('y')], None);
         assert_eq!(chosen, Some(Setting::EmergencyCharge(true)));
     }
 
     #[test]
-    fn escape_backs_out_and_rows_wrap() {
+    fn escape_discards_then_closes_and_moving_discards() {
         let mut menu = Menu::Closed;
         press(&mut menu, &[KeyCode::Char('m'), KeyCode::Up], None);
         assert_eq!(
             menu,
-            Menu::Controls {
-                row: controls().len() - 1
+            Menu::Open {
+                row: controls().len() - 1,
+                choice: None
             }
         );
-        press(
-            &mut menu,
-            &[KeyCode::Enter, KeyCode::Esc, KeyCode::Esc],
-            None,
+        press(&mut menu, &[KeyCode::Right, KeyCode::Down], None);
+        assert_eq!(
+            menu,
+            Menu::Open {
+                row: 0,
+                choice: None
+            }
         );
+        press(&mut menu, &[KeyCode::Right, KeyCode::Esc], None);
+        assert_eq!(
+            menu,
+            Menu::Open {
+                row: 0,
+                choice: None
+            }
+        );
+        press(&mut menu, &[KeyCode::Esc], None);
         assert_eq!(menu, Menu::Closed);
     }
 }

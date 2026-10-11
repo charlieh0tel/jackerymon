@@ -53,7 +53,7 @@ const INPUT_COLOR: Color = Color::Green;
 const OUTPUT_COLOR: Color = Color::Yellow;
 const ALERT_COLOR: Color = Color::Red;
 const MISSING: &str = "—";
-const MENU_WIDTH: u16 = 44;
+const MENU_WIDTH: u16 = 46;
 /// Borders above and below the menu rows.
 const MENU_BORDER_HEIGHT: u16 = 2;
 const MENU_VALUE_WIDTH: usize = 20;
@@ -84,59 +84,56 @@ pub(super) fn draw(
 }
 
 fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option<&Status>) {
-    let selected = |line: Line<'static>, chosen: bool| {
-        if chosen { line.reversed() } else { line }
-    };
-    let (title, lines) = match menu {
+    let (selected, pending, confirming) = match menu {
         Menu::Closed => return,
-        Menu::Controls { row } => (
-            " Settings ".to_owned(),
-            controls
-                .iter()
-                .enumerate()
-                .map(|(index, control)| {
-                    let value = control
-                        .current(status)
-                        .map(|choice| setting_value_text(control.choices[choice]));
-                    selected(menu_row(control.label, value), index == row)
-                })
-                .collect(),
-        ),
-        Menu::Choices { row, choice } => {
-            let control = &controls[row];
+        Menu::Open { row, choice } => (row, choice, false),
+        Menu::Confirm { row, choice } => (row, Some(choice), true),
+    };
+    let mut lines: Vec<Line<'static>> = controls
+        .iter()
+        .enumerate()
+        .map(|(index, control)| {
             let current = control.current(status);
-            (
-                format!(" {} ", control.label),
-                control
-                    .choices
-                    .iter()
-                    .enumerate()
-                    .map(|(index, setting)| {
-                        let marker = if current == Some(index) { "● " } else { "  " };
-                        let text = format!("{marker}{}", setting_value_text(*setting));
-                        selected(Line::from(text), index == choice)
-                    })
-                    .collect(),
-            )
-        }
-        Menu::Confirm { row, choice } => (
-            " Confirm ".to_owned(),
-            vec![
-                Line::from(format!(
-                    "Turn {} {}?",
-                    controls[row].label,
-                    setting_value_text(controls[row].choices[choice])
-                )),
-                Line::from(
-                    controls[row].choices[choice]
-                        .warning()
-                        .unwrap_or_default()
-                        .to_owned(),
-                )
-                .fg(ALERT_COLOR),
-                Line::from("y yes   n no"),
-            ],
-        ),
+            if index != selected {
+                let value = current.map(|choice| setting_value_text(control.choices[choice]));
+                return menu_row(control.label, value);
+            }
+            let shown = pending.or(current);
+            let value = shown.map_or_else(
+                || MISSING.to_owned(),
+                |choice| setting_value_text(control.choices[choice]),
+            );
+            let line = Line::from(vec![
+                Span::raw(format!("{:<MENU_VALUE_WIDTH$}", control.label)),
+                Span::raw("◀ "),
+                // A value picked but not applied stands out.
+                if pending.is_some() && pending != current {
+                    Span::styled(value, OUTPUT_COLOR).bold()
+                } else {
+                    Span::raw(value)
+                },
+                Span::raw(" ▶"),
+            ]);
+            line.reversed()
+        })
+        .collect();
+    if confirming && let Some(choice) = pending {
+        let setting = controls[selected].choices[choice];
+        lines.push(Line::default());
+        lines.push(
+            Line::from(format!(
+                "{}: {}",
+                setting_value_text(setting),
+                setting.warning().unwrap_or_default()
+            ))
+            .fg(ALERT_COLOR),
+        );
+        lines.push(Line::from("apply anyway? y yes   n no"));
+    }
+    let hint = if confirming {
+        " y / n "
+    } else {
+        " ←/→ change  Enter apply  Esc back "
     };
     let height = u16::try_from(lines.len()).unwrap_or(u16::MAX) + MENU_BORDER_HEIGHT;
     let area = frame
@@ -144,14 +141,14 @@ fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option
         .centered(Constraint::Length(MENU_WIDTH), Constraint::Length(height));
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(title)),
+        Paragraph::new(lines).block(Block::bordered().title(" Settings ").title_bottom(hint)),
         area,
     );
 }
 
 fn menu_row(label: &str, value: Option<String>) -> Line<'static> {
     Line::from(format!(
-        "{label:<MENU_VALUE_WIDTH$}{}",
+        "{label:<MENU_VALUE_WIDTH$}  {}",
         value.unwrap_or_else(|| MISSING.to_owned())
     ))
 }
@@ -619,8 +616,22 @@ mod tests {
         let now = Instant::now();
         let mut monitor = Monitor::new("123456789".to_owned());
         monitor.apply(sample(1, json!({"oac": 1, "lm": 2, "ast": 120})), now);
-        let screen = render_with(&monitor, Menu::Controls { row: 0 }, now);
-        for expected in ["Settings", "AC output", "Light", "high", "Auto-off"] {
+        let screen = render_with(
+            &monitor,
+            Menu::Open {
+                row: 0,
+                choice: Some(1),
+            },
+            now,
+        );
+        for expected in [
+            "Settings",
+            "◀ off ▶",
+            "Light",
+            "high",
+            "Auto-off",
+            "Enter apply",
+        ] {
             assert!(screen.contains(expected), "missing {expected:?}");
         }
         let row = controls()
@@ -628,7 +639,7 @@ mod tests {
             .position(|control| control.label == "Emergency charge")
             .expect("emergency charge row");
         let screen = render_with(&monitor, Menu::Confirm { row, choice: 0 }, now);
-        assert!(screen.contains("Turn Emergency charge on?"));
-        assert!(screen.contains("for emergencies only"));
+        assert!(screen.contains("on: for emergencies only"));
+        assert!(screen.contains("apply anyway?"));
     }
 }
