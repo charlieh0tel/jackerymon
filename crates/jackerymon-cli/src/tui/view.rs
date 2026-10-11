@@ -80,10 +80,22 @@ pub(super) fn draw(
     frame.render_widget(unit_panel(status), unit);
     draw_chart(frame, chart, monitor, now);
     frame.render_widget(footer_line(monitor), footer);
-    draw_menu(frame, menu, controls, status);
+    let applying = match monitor.control {
+        Some(ControlState::Pending(setting)) => Some(setting),
+        _ => None,
+    };
+    draw_menu(frame, menu, controls, status, applying);
 }
 
-fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option<&Status>) {
+/// `applying` is a setting sent but not yet confirmed; its row shows the
+/// requested value rather than flashing back to the old one.
+fn draw_menu(
+    frame: &mut Frame,
+    menu: Menu,
+    controls: &[Control],
+    status: Option<&Status>,
+    applying: Option<Setting>,
+) {
     let (selected, pending, confirming) = match menu {
         Menu::Closed => return,
         Menu::Open { row, choice } => (row, choice, false),
@@ -93,16 +105,22 @@ fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option
         .iter()
         .enumerate()
         .map(|(index, control)| {
+            let requested = applying
+                .and_then(|setting| control.choices.iter().position(|choice| *choice == setting));
             let current = control.current(status);
+            let text = |choice: usize| {
+                let value = setting_value_text(control.choices[choice]);
+                if requested == Some(choice) {
+                    format!("{value}…")
+                } else {
+                    value
+                }
+            };
             if index != selected {
-                let value = current.map(|choice| setting_value_text(control.choices[choice]));
-                return menu_row(control.label, value);
+                return menu_row(control.label, requested.or(current).map(text));
             }
-            let shown = pending.or(current);
-            let value = shown.map_or_else(
-                || MISSING.to_owned(),
-                |choice| setting_value_text(control.choices[choice]),
-            );
+            let shown = pending.or(requested).or(current);
+            let value = shown.map_or_else(|| MISSING.to_owned(), text);
             let line = Line::from(vec![
                 Span::raw(format!("{:<MENU_VALUE_WIDTH$}", control.label)),
                 Span::raw("◀ "),
@@ -529,8 +547,11 @@ mod tests {
     use super::timer_text;
     use crate::tui::menu::Menu;
     use crate::tui::menu::controls;
+    use crate::tui::monitor::ControlState;
     use crate::tui::monitor::Monitor;
     use crate::tui::monitor::tests::sample;
+    use jackerymon::control::Setting;
+    use jackerymon::status::LightMode;
     use jackerymon::status::OffTimer;
 
     const WIDTH: u16 = 100;
@@ -641,5 +662,31 @@ mod tests {
         let screen = render_with(&monitor, Menu::Confirm { row, choice: 0 }, now);
         assert!(screen.contains("on: for emergencies only"));
         assert!(screen.contains("apply anyway?"));
+    }
+
+    #[test]
+    fn menu_shows_requested_value_while_applying() {
+        let now = Instant::now();
+        let mut monitor = Monitor::new("123456789".to_owned());
+        monitor.apply(sample(1, json!({"lm": 1})), now);
+        monitor.control = Some(ControlState::Pending(Setting::Light(LightMode::High)));
+        let screen = render_with(
+            &monitor,
+            Menu::Open {
+                row: 2,
+                choice: None,
+            },
+            now,
+        );
+        assert!(screen.contains("◀ high… ▶"));
+        let screen = render_with(
+            &monitor,
+            Menu::Open {
+                row: 0,
+                choice: None,
+            },
+            now,
+        );
+        assert!(screen.contains("high…"));
     }
 }

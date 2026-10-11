@@ -109,7 +109,10 @@ async fn show(
     let mut interrupted = pin!(ctrl_c());
     loop {
         terminal.draw(|frame| view::draw(frame, monitor, menu, &controls, Instant::now()))?;
+        // Biased so a status sample is shown before the reply that it
+        // confirmed, never the reverse.
         tokio::select! {
+            biased;
             event = events.recv() => match event {
                 Some(event) => monitor.apply(event, Instant::now()),
                 None => return Ok(()),
