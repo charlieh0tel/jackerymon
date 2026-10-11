@@ -3,8 +3,12 @@
 //! One connection serves many queries.  Transport failures reconnect with
 //! fresh discovery; a successful sample resets the failure streak.  Invalid
 //! protocol data stops polling at once: retrying cannot fix a wrong key.
+//!
+//! Setting changes arrive on a channel and run between queries, never
+//! during one.  Each counts as applied only once a status read shows it.
 
 use std::future::Future;
+use std::future::pending;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::pin::pin;
@@ -12,11 +16,23 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use thiserror::Error;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio::time::sleep;
 
 use crate::ble::BleError;
+use crate::control::ControlError;
+use crate::control::Setting;
+use crate::frame::DecodeError;
 use crate::frame::RawStatus;
+use crate::frame::Request;
+use crate::status::Status;
+
+/// Status reads that may confirm a setting; the unit can apply it a
+/// little after acknowledging.
+const VERIFY_ATTEMPTS: u32 = 3;
+const VERIFY_DELAY: Duration = Duration::from_millis(500);
 
 /// Polling timing and failure policy.
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +48,16 @@ pub struct PollConfig {
     /// is off.
     pub max_consecutive_failures: Option<NonZeroU32>,
 }
+
+/// A setting change for the poller to apply, answered on `reply`.
+#[derive(Debug)]
+pub struct ControlRequest {
+    pub setting: Setting,
+    pub reply: oneshot::Sender<Result<(), ControlError>>,
+}
+
+/// Where setting changes come from; `None` when the caller has none.
+pub type Commands = Option<mpsc::Receiver<ControlRequest>>;
 
 /// One decoded response and the counters at the time it arrived.
 #[derive(Clone, Debug)]
@@ -81,7 +107,12 @@ pub(crate) trait Connector {
 
 /// One open connection to the unit.
 pub(crate) trait Link {
-    async fn query(&mut self, timeout: Duration) -> Result<RawStatus, BleError>;
+    /// Sends `request` and returns the JSON body of its response.
+    async fn exchange(
+        &mut self,
+        request: &Request,
+        timeout: Duration,
+    ) -> Result<RawStatus, BleError>;
 
     /// Waits `duration`, failing early if the unit disconnects.
     async fn idle(&mut self, duration: Duration) -> Result<(), BleError>;
@@ -103,6 +134,7 @@ struct Counters {
 pub(crate) async fn poll_with<C: Connector>(
     mut connector: C,
     config: PollConfig,
+    mut commands: Commands,
     stop: impl Future<Output = ()>,
     mut on_event: impl FnMut(PollEvent) -> ControlFlow<()>,
 ) -> Result<(), PollError> {
@@ -124,7 +156,7 @@ pub(crate) async fn poll_with<C: Connector>(
                     ControlFlow::Continue(()) => {
                         tokio::select! {
                             () = &mut stop => Ok(ControlFlow::Break(())),
-                            outcome = serve(&mut link, config, &mut counters, &mut on_event) => outcome,
+                            outcome = serve(&mut link, config, &mut commands, &mut counters, &mut on_event) => outcome,
                         }
                     }
                 };
@@ -168,26 +200,113 @@ pub(crate) async fn poll_with<C: Connector>(
 async fn serve<L: Link>(
     link: &mut L,
     config: PollConfig,
+    commands: &mut Commands,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
 ) -> Result<ControlFlow<()>, BleError> {
     loop {
         let started = Instant::now();
-        let status = link.query(config.timeout).await?;
-        counters.samples += 1;
-        counters.consecutive_failures = 0;
-        let sample = Sample {
-            timestamp: SystemTime::now(),
-            sample: counters.samples,
-            connection: counters.connections,
-            transport_failures: counters.transport_failures,
-            query: started.elapsed(),
-            status,
-        };
-        if on_event(PollEvent::Sample(sample)).is_break() {
+        let status = link.exchange(&Request::status(), config.timeout).await?;
+        if record(status, started, counters, on_event).is_break() {
             return Ok(ControlFlow::Break(()));
         }
-        link.idle(config.interval).await?;
+        // A setting change restarts the wait: its status reads are samples.
+        loop {
+            tokio::select! {
+                result = link.idle(config.interval) => {
+                    result?;
+                    break;
+                }
+                Some(request) = next_command(commands) => {
+                    if apply(link, config, request, counters, on_event).await?.is_break() {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn next_command(commands: &mut Commands) -> Option<ControlRequest> {
+    match commands {
+        Some(receiver) => receiver.recv().await,
+        None => pending().await,
+    }
+}
+
+/// Reports one status response as a sample.
+fn record(
+    status: RawStatus,
+    started: Instant,
+    counters: &mut Counters,
+    on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    counters.samples += 1;
+    counters.consecutive_failures = 0;
+    on_event(PollEvent::Sample(Sample {
+        timestamp: SystemTime::now(),
+        sample: counters.samples,
+        connection: counters.connections,
+        transport_failures: counters.transport_failures,
+        query: started.elapsed(),
+        status,
+    }))
+}
+
+/// Sends one setting, then reads status until it shows the change.  A
+/// device rejection is answered and polling goes on; a transport failure
+/// is answered and returned so the link reconnects.
+async fn apply<L: Link>(
+    link: &mut L,
+    config: PollConfig,
+    request: ControlRequest,
+    counters: &mut Counters,
+    on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
+) -> Result<ControlFlow<()>, BleError> {
+    let setting = request.setting;
+    let answer = |reply: oneshot::Sender<_>, result| {
+        // The requester may have given up; polling goes on regardless.
+        reply.send(result).ok();
+    };
+    match link.exchange(&setting.request(), config.timeout).await {
+        Ok(_echo) => {}
+        Err(BleError::Decode(DecodeError::Device { code, .. })) => {
+            answer(request.reply, Err(ControlError::Rejected { setting, code }));
+            return Ok(ControlFlow::Continue(()));
+        }
+        Err(error) => {
+            answer(request.reply, Err(transport(setting, &error)));
+            return Err(error);
+        }
+    }
+    for attempt in 1..=VERIFY_ATTEMPTS {
+        let started = Instant::now();
+        let status = match link.exchange(&Request::status(), config.timeout).await {
+            Ok(status) => status,
+            Err(error) => {
+                answer(request.reply, Err(transport(setting, &error)));
+                return Err(error);
+            }
+        };
+        let applied = Status::try_from(status.clone()).is_ok_and(|status| setting.applied(&status));
+        let flow = record(status, started, counters, on_event);
+        if applied {
+            answer(request.reply, Ok(()));
+            return Ok(flow);
+        }
+        if flow.is_break() || attempt == VERIFY_ATTEMPTS {
+            answer(request.reply, Err(ControlError::NotApplied(setting)));
+            return Ok(flow);
+        }
+        sleep(VERIFY_DELAY).await;
+    }
+    unreachable!("the last attempt answers")
+}
+
+fn transport(setting: Setting, error: &BleError) -> ControlError {
+    ControlError::Transport {
+        setting,
+        error: error.to_string(),
     }
 }
 
@@ -203,32 +322,47 @@ mod tests {
 
     use serde_json::json;
 
+    use tokio::sync::mpsc;
+    use tokio::sync::oneshot;
+
     use super::Connector;
+    use super::ControlRequest;
     use super::Link;
     use super::PollConfig;
     use super::PollError;
     use super::PollEvent;
     use super::poll_with;
     use crate::ble::BleError;
+    use crate::control::ControlError;
+    use crate::control::Setting;
     use crate::frame::DecodeError;
     use crate::frame::RawStatus;
+    use crate::frame::Request;
+    use crate::status::LightMode;
 
     const LIMIT: NonZeroU32 = NonZeroU32::new(3).expect("nonzero");
 
-    /// Scripted outcome of one connect or query.
+    /// Scripted outcome of one connect or exchange.
     enum Step {
         ConnectFails,
         Status(i64),
+        /// Status showing light mode `lm`.
+        Light(i64),
+        /// The unit echoes a setting.
+        Ack,
+        /// The unit rejects a setting with this code.
+        Reject(u8),
         QueryFails,
         BadData,
         /// Query succeeds, then the unit disconnects while idle.
         StatusThenDrop(i64),
     }
 
-    /// Shared script and a log of closed links.
+    /// Shared script, actions sent, and a count of closed links.
     #[derive(Clone, Default)]
     struct Script {
         steps: Rc<RefCell<VecDeque<Step>>>,
+        actions: Rc<RefCell<Vec<u8>>>,
         connects: Rc<RefCell<u32>>,
         closed: Rc<RefCell<u32>>,
     }
@@ -256,10 +390,23 @@ mod tests {
     }
 
     impl Link for FakeLink {
-        async fn query(&mut self, _timeout: Duration) -> Result<RawStatus, BleError> {
+        async fn exchange(
+            &mut self,
+            request: &Request,
+            _timeout: Duration,
+        ) -> Result<RawStatus, BleError> {
+            self.script.actions.borrow_mut().push(request.action.0);
             let step = self.script.steps.borrow_mut().pop_front();
             match step {
                 Some(Step::Status(battery)) => Ok(status(battery)),
+                Some(Step::Light(mode)) => {
+                    Ok(json!({"lm": mode}).as_object().expect("object").clone())
+                }
+                Some(Step::Ack) => Ok(RawStatus::new()),
+                Some(Step::Reject(code)) => Err(BleError::Decode(DecodeError::Device {
+                    action: request.action.0,
+                    code,
+                })),
                 Some(Step::StatusThenDrop(battery)) => {
                     self.drop_while_idle = true;
                     Ok(status(battery))
@@ -305,7 +452,7 @@ mod tests {
         let script = Script::default();
         script.steps.borrow_mut().extend(steps);
         let mut samples = Vec::new();
-        let result = poll_with(script.clone(), config(), pending(), |event| {
+        let result = poll_with(script.clone(), config(), None, pending(), |event| {
             if let PollEvent::Sample(sample) = event {
                 samples.push((
                     sample.sample,
@@ -390,6 +537,7 @@ mod tests {
         let result = poll_with(
             script.clone(),
             config(),
+            None,
             tokio::time::sleep(Duration::from_secs(1)),
             |_| ControlFlow::Continue(()),
         )
@@ -413,6 +561,7 @@ mod tests {
                 max_consecutive_failures: None,
                 ..config()
             },
+            None,
             pending(),
             |event| match event {
                 PollEvent::TransportFailure { .. } => {
@@ -426,5 +575,99 @@ mod tests {
         .await;
         assert!(result.is_ok());
         assert_eq!(failures, 10);
+    }
+
+    /// Polls with one setting queued until `samples` samples; returns the
+    /// reply, the actions sent, and the poll result.
+    async fn control(
+        steps: Vec<Step>,
+        setting: Setting,
+        samples: u64,
+    ) -> (Result<(), ControlError>, Vec<u8>, Result<(), PollError>) {
+        let script = Script::default();
+        script.steps.borrow_mut().extend(steps);
+        let (sender, receiver) = mpsc::channel(1);
+        let (reply, answer) = oneshot::channel();
+        sender
+            .send(ControlRequest { setting, reply })
+            .await
+            .expect("queued");
+        let result = poll_with(
+            script.clone(),
+            config(),
+            Some(receiver),
+            pending(),
+            |event| match event {
+                PollEvent::Sample(sample) if sample.sample == samples => ControlFlow::Break(()),
+                _ => ControlFlow::Continue(()),
+            },
+        )
+        .await;
+        let actions = script.actions.borrow().clone();
+        (answer.await.expect("answered"), actions, result)
+    }
+
+    const LIGHT: Setting = Setting::Light(LightMode::Low);
+
+    #[tokio::test(start_paused = true)]
+    async fn setting_is_verified_by_status() {
+        let (reply, actions, result) = control(
+            vec![Step::Status(100), Step::Ack, Step::Light(0), Step::Light(1)],
+            LIGHT,
+            3,
+        )
+        .await;
+        assert_eq!(reply, Ok(()));
+        assert_eq!(actions, [6, 17, 6, 6]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rejection_is_answered_and_polling_continues() {
+        let (reply, actions, result) = control(
+            vec![Step::Status(100), Step::Reject(5), Step::Status(99)],
+            LIGHT,
+            2,
+        )
+        .await;
+        assert_eq!(
+            reply,
+            Err(ControlError::Rejected {
+                setting: LIGHT,
+                code: 5
+            })
+        );
+        assert_eq!(actions, [6, 17, 6]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unconfirmed_setting_is_reported() {
+        let (reply, _, _) = control(
+            vec![
+                Step::Status(100),
+                Step::Ack,
+                Step::Light(0),
+                Step::Light(0),
+                Step::Light(0),
+            ],
+            LIGHT,
+            4,
+        )
+        .await;
+        assert_eq!(reply, Err(ControlError::NotApplied(LIGHT)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn transport_failure_is_answered_and_reconnects() {
+        let (reply, actions, result) = control(
+            vec![Step::Status(100), Step::QueryFails, Step::Status(99)],
+            LIGHT,
+            2,
+        )
+        .await;
+        assert!(matches!(reply, Err(ControlError::Transport { .. })));
+        assert_eq!(actions, [6, 17, 6]);
+        assert!(result.is_ok());
     }
 }

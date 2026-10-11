@@ -60,7 +60,7 @@ pub(crate) async fn run(arguments: PollArgs) -> Result<()> {
             std::future::pending::<()>().await;
         }
     };
-    let result = ble::poll(adapter, key_file, config, stop, |event| match event {
+    let result = ble::poll(adapter, key_file, config, None, stop, |event| match event {
         PollEvent::Connected { connection } => {
             summary.connections = connection;
             ControlFlow::Continue(())

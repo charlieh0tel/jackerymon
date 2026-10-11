@@ -53,6 +53,7 @@ pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
         adapter,
         key_file,
         config,
+        None,
         async {
             // A dropped sender also means stop.
             stopped.await.ok();

@@ -28,13 +28,13 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::advertisement;
-use crate::frame::Action;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
 use crate::frame::Request;
 use crate::frame::ResponseDecoder;
 use crate::identity::BleKey;
 use crate::key_file::KeyFile;
+use crate::poll::Commands;
 use crate::poll::Connector;
 use crate::poll::Link;
 use crate::poll::PollConfig;
@@ -105,10 +105,11 @@ pub async fn poll(
     adapter: Adapter,
     key_file: KeyFile,
     config: PollConfig,
+    commands: Commands,
     stop: impl Future<Output = ()>,
     on_event: impl FnMut(PollEvent) -> ControlFlow<()>,
 ) -> Result<(), PollError> {
-    poll_with(Unit { adapter, key_file }, config, stop, on_event).await
+    poll_with(Unit { adapter, key_file }, config, commands, stop, on_event).await
 }
 
 /// The saved unit, reachable through one adapter.
@@ -234,13 +235,17 @@ struct Connection {
 }
 
 impl Link for Connection {
-    async fn query(&mut self, limit: Duration) -> Result<RawStatus, BleError> {
-        let mut decoder = ResponseDecoder::new(self.key.clone(), Action::READ_DEVICE_INFO);
+    async fn exchange(
+        &mut self,
+        request: &Request,
+        limit: Duration,
+    ) -> Result<RawStatus, BleError> {
+        let mut decoder = ResponseDecoder::new(self.key.clone(), request.action);
         let mask = NonZeroU8::new(rand::random_range(1..=u8::MAX)).expect("mask is nonzero");
         self.peripheral
             .write(
                 &self.command,
-                &Request::status().encode(&self.key, mask),
+                &request.encode(&self.key, mask),
                 WriteType::WithoutResponse,
             )
             .await?;

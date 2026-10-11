@@ -248,7 +248,7 @@ key (`PortableControlFormat.java`, `lc/a.java`, `cmd/portable/b.java`):
 | 12 | `odcc` | car output 0/1 (split-DC models) |
 | 13 | `oac` | AC output 0/1 |
 | 17 | `lm` | light 0 off, 1 low, 2 high, 3 SOS |
-| 18 | `slt` | screen; reported back as `sltb` |
+| 18 | `slt` | screen minutes 0, 2, 120; reported back as `sltb` 1, 2, 3 |
 | 19 | `ast` | auto-off minutes, 0 never |
 | 20 | `pm` | energy saving minutes, 0 never |
 | 21 | `cs` | charge speed |

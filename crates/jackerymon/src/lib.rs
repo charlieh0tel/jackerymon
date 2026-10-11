@@ -5,6 +5,7 @@
 pub mod advertisement;
 pub mod ble;
 mod cipher;
+pub mod control;
 pub mod frame;
 pub mod identity;
 pub mod key_file;

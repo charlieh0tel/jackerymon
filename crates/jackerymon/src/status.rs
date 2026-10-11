@@ -50,6 +50,19 @@ pub enum LightMode {
     Unknown(i64),
 }
 
+impl LightMode {
+    /// Value on the wire; inverse of `From<i64>`.
+    pub(crate) fn wire(self) -> i64 {
+        match self {
+            Self::Off => 0,
+            Self::Low => 1,
+            Self::High => 2,
+            Self::Sos => 3,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
 impl From<i64> for LightMode {
     fn from(value: i64) -> Self {
         match value {
@@ -70,6 +83,17 @@ pub enum ChargeSpeed {
     Unknown(i64),
 }
 
+impl ChargeSpeed {
+    /// Value on the wire; inverse of `From<i64>`.
+    pub(crate) fn wire(self) -> i64 {
+        match self {
+            Self::Fast => 0,
+            Self::Mute => 1,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
 impl From<i64> for ChargeSpeed {
     fn from(value: i64) -> Self {
         match value {
@@ -88,6 +112,17 @@ pub enum BatteryProtection {
     Unknown(i64),
 }
 
+impl BatteryProtection {
+    /// Value on the wire; inverse of `From<i64>`.
+    pub(crate) fn wire(self) -> i64 {
+        match self {
+            Self::Full => 0,
+            Self::Eco => 1,
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
 impl From<i64> for BatteryProtection {
     fn from(value: i64) -> Self {
         match value {
@@ -98,7 +133,9 @@ impl From<i64> for BatteryProtection {
     }
 }
 
-/// `sltb`: the app's screen setting.  0 selects nothing in the app.
+/// `sltb`: the app's screen setting.  0 selects nothing in the app.  The
+/// setting is written as `slt` in minutes instead (see
+/// [`ScreenMode::minutes`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenMode {
     Off,
@@ -107,6 +144,19 @@ pub enum ScreenMode {
     /// "Steady on": two hours.
     Steady,
     Unknown(i64),
+}
+
+impl ScreenMode {
+    /// Minutes written as `slt`; the unit reports the mode back as an
+    /// index in `sltb`.  `Unknown(n)` is written as `n` minutes.
+    pub(crate) fn minutes(self) -> i64 {
+        match self {
+            Self::Off => 0,
+            Self::Brief => 2,
+            Self::Steady => 120,
+            Self::Unknown(value) => value,
+        }
+    }
 }
 
 impl From<i64> for ScreenMode {
@@ -145,6 +195,16 @@ impl From<i64> for TemperatureAlarm {
 pub enum OffTimer {
     Never,
     Minutes(u32),
+}
+
+impl OffTimer {
+    /// Minutes on the wire, 0 for never.
+    pub(crate) fn minutes(self) -> u32 {
+        match self {
+            Self::Never => 0,
+            Self::Minutes(minutes) => minutes,
+        }
+    }
 }
 
 impl From<u32> for OffTimer {

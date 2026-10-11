@@ -15,7 +15,13 @@ cargo run --release -- poll                  # until Ctrl-C
 cargo run --release -- poll --count 12       # finite run
 cargo run --release -- poll --max-failures 0 # retry forever
 cargo run --release -- tui                   # live status screen
+cargo run --release -- set light low         # change one setting
 ```
+
+`set` changes AC or DC output, light, screen, auto-off, energy saving,
+charge speed, battery protection, super charge, or UPS mode; see
+`jackerymon set --help`. It reports success only after a status read
+shows the change. Turning an output off needs `--yes`.
 
 `tui` shows battery, power, outputs, settings, faults, link state, data
 age, and a ten-minute input/output power chart. It retries forever while

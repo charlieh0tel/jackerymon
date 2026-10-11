@@ -259,6 +259,9 @@ within about 90 ms, followed by an unsolicited action-0 property push
 attempt was cut short by a logging bug after the light came on; the
 rerun turned it off. Details are in docs/protocol.md.
 
+`jackerymon set light low` and `set light off` then each succeeded,
+confirmed by a status read, in about 7.5 seconds including the scan.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
