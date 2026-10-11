@@ -26,7 +26,6 @@ use jackerymon::ble;
 use jackerymon::control::ControlError;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
-use jackerymon::poll::PollEvent;
 use ratatui::DefaultTerminal;
 use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
@@ -36,6 +35,7 @@ use tokio::time::Instant;
 use tokio::time::interval;
 
 use crate::connection::ConnectionArgs;
+use crate::record::Update;
 use crate::tui::menu::Menu;
 use crate::tui::menu::controls;
 use crate::tui::monitor::ControlState;
@@ -70,7 +70,7 @@ pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
             stopped.await.ok();
         },
         move |event| {
-            if sender.send(event).is_ok() {
+            if sender.send(Update::from(event)).is_ok() {
                 ControlFlow::Continue(())
             } else {
                 ControlFlow::Break(())
@@ -96,7 +96,7 @@ type InProgress = Option<(Setting, oneshot::Receiver<Result<(), ControlError>>)>
 async fn show(
     terminal: &mut DefaultTerminal,
     monitor: &mut Monitor,
-    events: &mut mpsc::UnboundedReceiver<PollEvent>,
+    events: &mut mpsc::UnboundedReceiver<Update>,
     commands: &mpsc::Sender<ControlRequest>,
 ) -> Result<()> {
     let controls = controls();

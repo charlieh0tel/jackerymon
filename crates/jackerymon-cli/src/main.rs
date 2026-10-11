@@ -2,6 +2,7 @@
 
 mod connection;
 mod poll;
+mod record;
 mod set;
 mod tui;
 

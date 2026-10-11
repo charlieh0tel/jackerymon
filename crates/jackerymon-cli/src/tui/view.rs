@@ -535,7 +535,6 @@ fn duration_text(age: Duration) -> String {
 mod tests {
     use std::time::Duration;
 
-    use jackerymon::poll::PollEvent;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use serde_json::json;
@@ -545,6 +544,7 @@ mod tests {
     use super::draw;
     use super::fault_text;
     use super::timer_text;
+    use crate::record::Update;
     use crate::tui::menu::Menu;
     use crate::tui::menu::controls;
     use crate::tui::monitor::ControlState;
@@ -579,7 +579,7 @@ mod tests {
     fn shows_live_explorer_2000_status() {
         let now = Instant::now();
         let mut monitor = Monitor::new("123456789".to_owned());
-        monitor.apply(PollEvent::Connected { connection: 1 }, now);
+        monitor.apply(Update::Connected { connection: 1 }, now);
         monitor.apply(
             sample(
                 1,

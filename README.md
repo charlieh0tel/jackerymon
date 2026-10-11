@@ -53,7 +53,8 @@ connection, so the phone app cannot connect while it runs.
 
 `poll` reads `jackery-key.json` (`--key-file` to change) and takes the
 PoC's `--address`, `--timeout`, `--interval`, and `--count`. Output
-matches the PoC's `--poll` JSON lines, except that keys are sorted.
+matches the PoC's `--poll` JSON lines, except that keys inside `status` are
+sorted.
 Linux needs BlueZ and the D-Bus development headers to build.
 
 ## Python BLE PoC

@@ -5,23 +5,15 @@ use std::ops::ControlFlow;
 
 use anyhow::Context;
 use anyhow::Result;
-use chrono::DateTime;
-use chrono::SecondsFormat;
-use chrono::Utc;
 use clap::Args;
 use jackerymon::ble;
 use jackerymon::poll::PollError;
 use jackerymon::poll::PollEvent;
-use jackerymon::poll::Sample;
-use serde_json::json;
 use tokio::signal::ctrl_c;
 use tokio::time::Instant;
 
 use crate::connection::ConnectionArgs;
-
-const MILLIS_PER_SECOND: f64 = 1000.0;
-/// `query_ms` is rounded to tenths, as the Python PoC does.
-const QUERY_MS_STEPS_PER_MILLI: f64 = 10.0;
+use crate::record::SampleRecord;
 
 #[derive(Args)]
 pub(crate) struct PollArgs {
@@ -67,7 +59,7 @@ pub(crate) async fn run(arguments: PollArgs) -> Result<()> {
         }
         PollEvent::Sample(sample) => {
             summary.samples = sample.sample;
-            println!("{}", sample_line(&sample));
+            println!("{}", SampleRecord::from(&sample));
             if sample.sample == arguments.count {
                 ControlFlow::Break(())
             } else {
@@ -92,21 +84,4 @@ pub(crate) async fn run(arguments: PollArgs) -> Result<()> {
         started.elapsed().as_secs_f64()
     );
     result.context("polling failed")
-}
-
-/// JSON line in the same shape as the Python PoC's `--poll` output.
-fn sample_line(sample: &Sample) -> String {
-    let query_ms = (sample.query.as_secs_f64() * MILLIS_PER_SECOND * QUERY_MS_STEPS_PER_MILLI)
-        .round()
-        / QUERY_MS_STEPS_PER_MILLI;
-    json!({
-        "timestamp": DateTime::<Utc>::from(sample.timestamp)
-            .to_rfc3339_opts(SecondsFormat::Micros, false),
-        "sample": sample.sample,
-        "connection": sample.connection,
-        "transport_failures": sample.transport_failures,
-        "query_ms": query_ms,
-        "status": sample.status,
-    })
-    .to_string()
 }

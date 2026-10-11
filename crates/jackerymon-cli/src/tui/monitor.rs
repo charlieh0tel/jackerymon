@@ -4,9 +4,10 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use jackerymon::control::Setting;
-use jackerymon::poll::PollEvent;
 use jackerymon::status::Status;
 use tokio::time::Instant;
+
+use crate::record::Update;
 
 /// How much power history the chart keeps.
 pub(super) const HISTORY: Duration = Duration::from_secs(10 * 60);
@@ -76,17 +77,14 @@ impl Monitor {
         }
     }
 
-    pub(super) fn apply(&mut self, event: PollEvent, now: Instant) {
-        match event {
-            PollEvent::Connected { .. } => self.link = Link::Connected,
-            PollEvent::TransportFailure { error, consecutive } => {
+    pub(super) fn apply(&mut self, update: Update, now: Instant) {
+        match update {
+            Update::Connected { .. } => self.link = Link::Connected,
+            Update::Lost { error, consecutive } => {
                 self.transport_failures += 1;
-                self.link = Link::Lost {
-                    error: error.to_string(),
-                    consecutive,
-                };
+                self.link = Link::Lost { error, consecutive };
             }
-            PollEvent::Sample(sample) => {
+            Update::Sample(sample) => {
                 self.samples = sample.sample;
                 match Status::try_from(sample.status) {
                     Ok(status) => {
@@ -124,11 +122,7 @@ impl Monitor {
 #[cfg(test)]
 pub(super) mod tests {
     use std::time::Duration;
-    use std::time::SystemTime;
 
-    use jackerymon::ble::BleError;
-    use jackerymon::poll::PollEvent;
-    use jackerymon::poll::Sample;
     use serde_json::Value;
     use serde_json::json;
     use tokio::time::Instant;
@@ -136,14 +130,16 @@ pub(super) mod tests {
     use super::HISTORY;
     use super::Link;
     use super::Monitor;
+    use crate::record::SampleRecord;
+    use crate::record::Update;
 
-    pub(in crate::tui) fn sample(number: u64, status: Value) -> PollEvent {
-        PollEvent::Sample(Sample {
-            timestamp: SystemTime::UNIX_EPOCH,
+    pub(in crate::tui) fn sample(number: u64, status: Value) -> Update {
+        Update::Sample(SampleRecord {
+            timestamp: "1970-01-01T00:00:00.000000+00:00".to_owned(),
             sample: number,
             connection: 1,
             transport_failures: 0,
-            query: Duration::from_millis(220),
+            query_ms: 220.0,
             status: status.as_object().expect("object").clone(),
         })
     }
@@ -152,15 +148,15 @@ pub(super) mod tests {
     fn tracks_link_and_latest_status() {
         let now = Instant::now();
         let mut monitor = Monitor::new("123456789".to_owned());
-        monitor.apply(PollEvent::Connected { connection: 1 }, now);
+        monitor.apply(Update::Connected { connection: 1 }, now);
         assert_eq!(monitor.link, Link::Connected);
         monitor.apply(sample(1, json!({"rb": 90, "ip": 5, "op": 7})), now);
         let reading = monitor.latest.as_ref().expect("reading");
         assert_eq!(reading.status.battery_percent, Some(90));
         assert_eq!(monitor.history.len(), 1);
         monitor.apply(
-            PollEvent::TransportFailure {
-                error: BleError::Disconnected,
+            Update::Lost {
+                error: "device disconnected".to_owned(),
                 consecutive: 1,
             },
             now,
