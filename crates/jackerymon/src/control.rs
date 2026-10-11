@@ -61,7 +61,6 @@ impl Setting {
     #[must_use]
     pub fn warning(self) -> Option<&'static str> {
         match self {
-            Self::AcOutput(false) | Self::DcOutput(false) => Some("cuts power to connected loads"),
             // Jackery: "For emergency situations only ... not recommended
             // for regular use."
             Self::EmergencyCharge(true) => Some("for emergencies only, not regular use"),
@@ -169,8 +168,9 @@ mod tests {
 
     #[test]
     fn risky_settings_carry_a_warning() {
-        assert!(Setting::AcOutput(false).warning().is_some());
-        assert!(Setting::DcOutput(false).warning().is_some());
+        // The user decided outputs need no confirmation.
+        assert!(Setting::AcOutput(false).warning().is_none());
+        assert!(Setting::DcOutput(false).warning().is_none());
         assert!(Setting::EmergencyCharge(true).warning().is_some());
         assert!(Setting::AcOutput(true).warning().is_none());
         assert!(Setting::EmergencyCharge(false).warning().is_none());

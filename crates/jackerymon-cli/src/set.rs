@@ -31,9 +31,9 @@ const MINUTES_PER_HOUR: u32 = 60;
 pub(crate) struct SetArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
-    /// Confirm a risky setting: turning an output off, which cuts power to
-    /// its loads, or turning emergency charging on.
-    // Global so it may follow the setting: `set ac off --yes`.
+    /// Confirm turning emergency charging on, which Jackery reserves for
+    /// emergencies.
+    // Global so it may follow the setting: `set emergency-charge on --yes`.
     #[arg(long, global = true)]
     yes: bool,
     #[command(subcommand)]

@@ -623,7 +623,12 @@ mod tests {
         for expected in ["Settings", "AC output", "Light", "high", "Auto-off"] {
             assert!(screen.contains(expected), "missing {expected:?}");
         }
-        let screen = render_with(&monitor, Menu::Confirm { row: 0, choice: 1 }, now);
-        assert!(screen.contains("Turn AC output off?"));
+        let row = controls()
+            .iter()
+            .position(|control| control.label == "Emergency charge")
+            .expect("emergency charge row");
+        let screen = render_with(&monitor, Menu::Confirm { row, choice: 0 }, now);
+        assert!(screen.contains("Turn Emergency charge on?"));
+        assert!(screen.contains("for emergencies only"));
     }
 }

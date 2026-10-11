@@ -38,14 +38,14 @@ cargo run --release -- set light low         # change one setting
 `set` changes AC or DC output, light, screen, auto-off, energy saving,
 charge speed (fast or quiet), battery protection, emergency charge, or
 UPS mode; see `jackerymon set --help`. It reports success only after a
-status read shows the change. Turning an output off or emergency
-charging on needs `--yes`.
+status read shows the change. Turning emergency charging on needs
+`--yes`.
 
 `tui` shows battery, power, outputs, settings, faults, link state, data
 age, and a ten-minute input/output power chart. It retries forever while
 the unit is unreachable and keeps the last reading. `m` opens a settings
 menu covering the same settings as `set`: arrows move, Enter chooses,
-Esc backs out, and turning an output off asks y/n first. The footer
+Esc backs out, and turning emergency charging on asks y/n first. The footer
 shows each change's progress and result. `q`, Esc, or Ctrl-C quits and
 closes the connection. It holds the unit's only BLE
 connection, so the phone app cannot connect while it runs.

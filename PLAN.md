@@ -105,9 +105,10 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
   reconnecting decides; giving up answers it as a transport failure.
   Commands share the poller's connection and never overlap a status
   query.
-- **Confirmation before risky settings.** Turning an output off cuts
-  power to its loads; emergency charging is, per Jackery, for emergencies
-  only. The TUI asks y/n before either; `jackerymon set` requires `--yes`.
+- **Confirmation only for emergency charging.** Jackery reserves it for
+  emergencies, so the TUI asks y/n and `jackerymon set` requires `--yes`
+  before turning it on. Outputs on or off need no confirmation (user
+  decision, 2026-10-11, reversing the earlier y/n for cutting power).
 - **No custom charge power.** Action 38 (`csc`, watts in 100 W steps,
   bounded by `csl`/`cst`) is decoded, but the app hides custom charging
   for model 12, the unit reports none of those keys, and a live test

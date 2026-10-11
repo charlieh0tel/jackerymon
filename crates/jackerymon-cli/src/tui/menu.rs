@@ -226,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn cutting_power_needs_confirmation() {
+    fn outputs_apply_without_confirmation() {
         let mut menu = Menu::Closed;
         let keys = [
             KeyCode::Char('m'),
@@ -234,12 +234,26 @@ mod tests {
             KeyCode::Down,
             KeyCode::Enter,
         ];
-        assert_eq!(press(&mut menu, &keys, None), None);
-        assert_eq!(menu, Menu::Confirm { row: 0, choice: 1 });
+        assert_eq!(
+            press(&mut menu, &keys, None),
+            Some(Setting::AcOutput(false))
+        );
+        assert_eq!(menu, Menu::Closed);
+    }
+
+    #[test]
+    fn emergency_charge_needs_confirmation() {
+        let row = controls()
+            .iter()
+            .position(|control| control.choices.contains(&Setting::EmergencyCharge(true)))
+            .expect("emergency charge row");
+        let mut menu = Menu::Choices { row, choice: 0 };
+        assert_eq!(press(&mut menu, &[KeyCode::Enter], None), None);
+        assert_eq!(menu, Menu::Confirm { row, choice: 0 });
         assert_eq!(press(&mut menu, &[KeyCode::Char('n')], None), None);
-        assert_eq!(menu, Menu::Choices { row: 0, choice: 1 });
+        assert_eq!(menu, Menu::Choices { row, choice: 0 });
         let chosen = press(&mut menu, &[KeyCode::Enter, KeyCode::Char('y')], None);
-        assert_eq!(chosen, Some(Setting::AcOutput(false)));
+        assert_eq!(chosen, Some(Setting::EmergencyCharge(true)));
     }
 
     #[test]
