@@ -140,10 +140,7 @@ fn draw_battery(frame: &mut Frame, area: Rect, status: Option<&Status>) {
                 "State",
                 field(|status| status.battery_state.map(battery_state_text)),
             ),
-            row(
-                "To full",
-                field(|status| status.input_hours_remaining.map(hours_text)),
-            ),
+            row("To full", field(to_full_text)),
             row(
                 "To empty",
                 field(|status| status.output_hours_remaining.map(hours_text)),
@@ -299,6 +296,16 @@ fn hours_text(hours: f64) -> String {
     format!("{hours:.1} h")
 }
 
+/// The unit reports 0 h to full while nothing charges; that is not an
+/// estimate.
+fn to_full_text(status: &Status) -> Option<String> {
+    if status.input_watts == Some(0) {
+        None
+    } else {
+        status.input_hours_remaining.map(hours_text)
+    }
+}
+
 fn ac_output_text(status: &Status) -> Option<String> {
     if status.ac_output? {
         Some(format!(
@@ -435,6 +442,7 @@ mod tests {
             "100 %",
             "27.9 °C",
             "99.9 h",
+            "To full    —",
             "120.9 V 60 Hz",
             "2 min",
             "12 h",
