@@ -233,6 +233,15 @@ minimum 213.3 ms, median 216.0 ms, maximum 577.4 ms. Outputs off,
 not explain the btmon case, when the user reported blinking icons.
 Either way the daemon must tolerate long absences.
 
+On 2026-10-11 the user asked to keep the unit polled so its radios stay
+on. A restarting Python poller first failed twice in a row: each run
+saw three connections drop before the first status request (06:08-06:09
+UTC). Its third run then produced samples. The Rust `jackerymon poll`,
+run with unlimited retries, then connected on the first attempt and
+returned samples with about 220 ms query latency and the same fields
+as the PoC. Whether continuous polling keeps the radios on is not yet
+known.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

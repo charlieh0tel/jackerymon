@@ -238,6 +238,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_live_poll_response() {
+        let status = parse(json!({
+            "acip": 0, "acohz": 0, "acov": 0, "acpsp": 0, "acpss": 0, "ast": 120,
+            "bs": 0, "bt": 279, "cip": 0, "cs": 0, "ec": 0, "ip": 0, "it": 0,
+            "lm": 0, "lps": 0, "oac": 0, "odc": 0, "op": 0, "ot": 999, "pal": 0,
+            "pm": 720, "pmb": 0, "rb": 100, "sfc": 0, "sltb": 1, "ta": 0,
+        }))
+        .expect("valid status");
+        assert_eq!(status.battery_state, Some(BatteryState::Idle));
+        assert_eq!(status.battery_celsius, Some(27.9));
+        assert_eq!(status.output_hours_remaining, Some(99.9));
+        assert_eq!(status.light_mode, Some(LightMode::Off));
+    }
+
+    #[test]
     fn keeps_unknown_enum_values() {
         let status = parse(json!({"bs": 7, "lm": 9})).expect("valid status");
         assert_eq!(status.battery_state, Some(BatteryState::Unknown(7)));

@@ -3,15 +3,23 @@
 Direct BLE monitoring for Jackery power stations; see [PLAN.md](PLAN.md)
 and [FINDINGS.md](FINDINGS.md).
 
-## Rust library
+## Rust
 
-`crates/jackerymon` holds the protocol: advertisement decoding, the
-model-12 GATT frame codec, key-file loading, and typed status. BLE
-transport is not ported yet.
+`crates/jackerymon` is the library: advertisement decoding, the
+model-12 GATT frame codec, key-file loading, typed status, btleplug
+transport, and polling. `crates/jackerymon-cli` builds `jackerymon`.
 
 ```sh
 cargo test
+cargo run --release -- poll                  # until Ctrl-C
+cargo run --release -- poll --count 12       # finite run
+cargo run --release -- poll --max-failures 0 # retry forever
 ```
+
+`poll` reads `jackery-key.json` (`--key-file` to change) and takes the
+PoC's `--address`, `--timeout`, `--interval`, and `--count`. Output
+matches the PoC's `--poll` JSON lines, except that keys are sorted.
+Linux needs BlueZ and the D-Bus development headers to build.
 
 ## Python BLE PoC
 

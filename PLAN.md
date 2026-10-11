@@ -32,8 +32,9 @@ After a 2026-10-05 power-cycle the unit stopped advertising for days
 cause unknown. The saved key then still worked: it survives power-cycle.
 
 The Rust library `crates/jackerymon` ports the codec, advertisement
-decoding, key-file loading, and typed status from the PoC, with offline
-tests. BLE transport is not ported yet. Key bootstrap stays in Python.
+decoding, key-file loading, typed status, btleplug transport, and the
+poller from the PoC, with offline tests. `jackerymon poll` matched the
+PoC's live results on its first run. Key bootstrap stays in Python.
 
 ## Decisions
 
@@ -79,10 +80,17 @@ tests. BLE transport is not ported yet. Key bootstrap stays in Python.
   the TUI connects directly. It consumes a stream of samples, not BLE,
   so the daemon can replace the source without TUI changes. The TUI does
   not log. While it runs, the phone app cannot connect.
-- **Workspace grows by need.** `crates/jackerymon` (library, typed errors,
-  no `anyhow`) now; a JSON-lines poller binary, `jackerymon-tui`, and
-  later `jackerymond` are added when started. Monitoring only; control
-  commands later.
+- **One program, subcommands.** `crates/jackerymon` is the library
+  (typed errors, no `anyhow`); `crates/jackerymon-cli` builds the single
+  `jackerymon` binary: `poll` now, `tui` and `daemon` later. One install
+  artifact sharing key-file and BLE options; the daemon binary carries
+  TUI code, which is acceptable. Monitoring only; control commands later.
+- **Polling lives in the library.** `poll` is generic over a small
+  connector/link pair so its retry policy is tested offline; btleplug
+  implements it. Events go to a callback that can stop polling; a stop
+  future (Ctrl-C) also closes the connection. The failure limit is
+  optional: `poll` defaults to three like the PoC, a monitor retries
+  forever.
 - **Key bootstrap stays in Python.** The cloud login is a one-time step;
   porting it buys nothing yet.
 
@@ -91,12 +99,11 @@ tests. BLE transport is not ported yet. Key bootstrap stays in Python.
 1. Measure polling reliability and diagnose intermittent disconnects.
    The unit sometimes turns its BLE/Wi-Fi radios off by itself; the
    daemon must treat long absence as normal. Find what turns them off
-   and which button restores them.
+   and which button restores them; test whether continuous polling
+   keeps them on.
 2. Compare telemetry with the display under a known load.
 3. Reset/unbinding effect on the key remains unknown.
-4. Port the BLE session (btleplug) and a JSON-lines poller binary;
-   validate against the unit.
-5. TUI: battery, input/output power, temperature, output states, error
+4. TUI: battery, input/output power, temperature, output states, error
    code, connection state, data age, power chart.
 
 ## Housekeeping
