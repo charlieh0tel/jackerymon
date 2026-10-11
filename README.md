@@ -43,6 +43,34 @@ Read status directly over BLE with the saved key (no cloud requests):
 uv run tools/jackery_key.py --status jackery-key.json
 ```
 
+Poll on one connection, every five seconds, until Ctrl-C:
+
+```sh
+uv run tools/jackery_key.py --poll jackery-key.json
+```
+
+For a finite run:
+
+```sh
+uv run tools/jackery_key.py --poll jackery-key.json --interval 5 --count 12
+```
+
+Polling emits flushed JSON lines on stdout: UTC `timestamp`, `sample`,
+`connection` (successful subscriptions), `transport_failures`, `query_ms`,
+and raw `status`. Diagnostics and a final summary go to stderr.
+`--interval` is the delay after each response; queries never overlap.
+`--count` counts successful samples, with 0 meaning unlimited.
+Transport failures reconnect with fresh identity discovery; three
+consecutive failures stop polling, and each successful sample resets that
+failure streak. Key/CRC/device errors stop immediately. A timed-out query
+always closes its connection before retrying.
+
+Live validation: 60 polls on one connection in 313.4 seconds, zero transport
+failures, median query latency 216.2 ms (p95 303.4 ms). USB, AC, and light
+states matched the user's manual changes. Wi-Fi credentials were absent.
+Longer runs, power-cycle behavior, and independent load measurements remain
+to be tested.
+
 The status path verifies the advertised serial/address, subscribes to
 notifications, sends one read-device-info command, and prints the returned
 wire-key JSON. It currently supports model 12 only. It handles fragmented
@@ -67,10 +95,10 @@ access is needed for the implemented key acquisition.
 
 Internally, `StatusSession` owns connection-loss notification and one
 pending request, with a fresh decoder for each query. This separates
-request state from connection setup in preparation for polling.
+request state from connection setup so polling can reuse its subscription.
 
 Offline tests:
 
 ```sh
-uv run --with bleak --with cryptography --with requests python -m unittest discover -s tools -p 'test_*.py'
+uv run tools/test_jackery_key.py
 ```

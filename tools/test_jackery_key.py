@@ -1,9 +1,16 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["bleak>=0.21,<4", "cryptography>=41", "requests>=2.31,<3"]
+# ///
 """Offline checks for the APK-derived protocol and cloud request boundaries."""
 
+import asyncio
 import base64
+import io
 import json
 import tempfile
 import unittest
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -223,6 +230,143 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "after 3 attempts"):
                 await poc.read_status(path, None, 1)
             self.assertEqual(attempt.await_count, 3)
+
+
+class PollingTests(unittest.IsolatedAsyncioTestCase):
+    """Polling reuses connections and retries transport failures only."""
+
+    async def run_poll(self, outcomes, count):
+        path = Mock()
+        path.read_text.return_value = json.dumps(
+            {
+                "model": 12,
+                "serial": "123456789",
+                "address": "address",
+                "bluetoothKey": base64.b64encode(b"test-key").decode(),
+            }
+        )
+        query = AsyncMock(side_effect=outcomes)
+        sessions = []
+
+        @asynccontextmanager
+        async def connect(*_args):
+            session = Mock(query=query, disconnected=asyncio.Event())
+            sessions.append(session)
+            yield Mock(), session
+
+        output = io.StringIO()
+        diagnostics = io.StringIO()
+        with (
+            patch.object(poc, "connected_status", connect),
+            patch.object(poc, "RECONNECT_DELAY", 0),
+            patch("sys.stdout", output),
+            patch("sys.stderr", diagnostics),
+        ):
+            await poc.poll_status(path, None, 1, 0.001, count)
+        return (
+            [json.loads(line) for line in output.getvalue().splitlines()],
+            sessions,
+            diagnostics.getvalue(),
+        )
+
+    async def test_multiple_samples_share_connection(self):
+        records, sessions, summary = await self.run_poll(
+            [{"rb": 100}, {"rb": 99}, {"rb": 98}], 3
+        )
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual([record["sample"] for record in records], [1, 2, 3])
+        self.assertEqual(records[-1]["status"], {"rb": 98})
+        self.assertIn("samples=3 connections=1", summary)
+
+    async def test_reconnect_keeps_sample_number_and_resets_failure_streak(self):
+        records, sessions, _ = await self.run_poll(
+            [
+                poc.BleakError("drop"),
+                poc.BleakError("drop"),
+                {"rb": 100},
+                poc.BleakError("drop"),
+                {"rb": 99},
+            ],
+            2,
+        )
+        self.assertEqual(len(sessions), 4)
+        self.assertEqual([record["sample"] for record in records], [1, 2])
+        self.assertEqual(records[-1]["transport_failures"], 3)
+
+    async def test_three_failures_stop_polling(self):
+        with self.assertRaisesRegex(RuntimeError, "3 consecutive"):
+            await self.run_poll([poc.BleakError("drop")] * 3, 1)
+
+    async def test_protocol_error_is_not_retried(self):
+        with self.assertRaisesRegex(ValueError, "CRC"):
+            await self.run_poll([ValueError("CRC"), {"rb": 100}], 1)
+
+    async def test_session_discards_idle_notifications_and_resets_decoder(self):
+        session = poc.StatusSession(b"test-key")
+        session.receive(None, ProtocolTests.response(b'{"rb":1}'))
+        client = Mock()
+        values = iter([b'{"rb":100}', b'{"rb":99}'])
+
+        async def write(*_args, **_kwargs):
+            packet = ProtocolTests.response(next(values))
+            session.receive(None, packet[:4])
+            session.receive(None, packet[4:])
+
+        client.write_gatt_char = AsyncMock(side_effect=write)
+        self.assertEqual(await session.query(client, 1), {"rb": 100})
+        session.receive(None, ProtocolTests.response(b'{"rb":1}'))
+        self.assertEqual(await session.query(client, 1), {"rb": 99})
+        self.assertIsNone(session.decoder)
+        self.assertIsNone(session.result)
+
+    async def test_cancelled_poll_closes_connection(self):
+        closed = []
+        session = Mock(
+            query=AsyncMock(side_effect=asyncio.CancelledError()),
+            disconnected=asyncio.Event(),
+        )
+
+        @asynccontextmanager
+        async def connect(*_args):
+            try:
+                yield Mock(), session
+            finally:
+                closed.append(True)
+
+        with (
+            patch.object(poc, "status_identity", return_value=(Mock(), b"test-key")),
+            patch.object(poc, "connected_status", connect),
+            patch("sys.stderr"),
+            self.assertRaises(asyncio.CancelledError),
+        ):
+            await poc.poll_status(Mock(), None, 1, 5, 0)
+        self.assertEqual(closed, [True])
+
+    async def test_idle_disconnect_reconnects_without_waiting_full_interval(self):
+        sessions = []
+
+        @asynccontextmanager
+        async def connect(*_args):
+            session = Mock(
+                query=AsyncMock(return_value={"rb": 100}), disconnected=asyncio.Event()
+            )
+            if not sessions:
+                session.disconnected.set()
+            sessions.append(session)
+            yield Mock(), session
+
+        output = io.StringIO()
+        with (
+            patch.object(poc, "status_identity", return_value=(Mock(), b"test-key")),
+            patch.object(poc, "connected_status", connect),
+            patch.object(poc, "RECONNECT_DELAY", 0),
+            patch("sys.stdout", output),
+            patch("sys.stderr"),
+        ):
+            await asyncio.wait_for(poc.poll_status(Mock(), None, 1, 60, 2), 1)
+        self.assertEqual(len(sessions), 2)
+        records = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(records[-1]["transport_failures"], 1)
 
 
 if __name__ == "__main__":

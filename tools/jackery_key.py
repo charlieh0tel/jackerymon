@@ -14,8 +14,9 @@ import os
 import secrets
 import sys
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
@@ -320,7 +321,7 @@ class StatusDecoder:
         return None
 
 
-async def read_status(path, address, timeout):
+def status_identity(path, address):
     saved = json.loads(path.read_text())
     if not isinstance(saved, dict) or saved.get("model") != 12:
         raise ValueError("Offline status currently supports only model 12")
@@ -340,6 +341,12 @@ async def read_status(path, address, timeout):
             device.address, advertisement.manufacturer_data, advertisement.service_data
         )
         return decoded is not None and decoded.serial == serial and decoded.model == 12
+
+    return matches, key
+
+
+async def read_status(path, address, timeout):
+    matches, key = status_identity(path, address)
 
     for attempt in range(1, STATUS_ATTEMPTS + 1):
         try:
@@ -409,7 +416,8 @@ class StatusSession:
             self.decoder = None
 
 
-async def status_attempt(matches, key, timeout):
+@asynccontextmanager
+async def connected_status(matches, key, timeout):
     device = await BleakScanner.find_device_by_filter(matches, timeout=timeout)
     if device is None:
         raise BleakError("Saved device identity not found in BLE advertisements")
@@ -419,7 +427,71 @@ async def status_attempt(matches, key, timeout):
         device, timeout=timeout, disconnected_callback=session.on_disconnect
     ) as client:
         await client.start_notify(NOTIFY, session.receive)
+        yield client, session
+
+
+async def status_attempt(matches, key, timeout):
+    async with connected_status(matches, key, timeout) as (client, session):
         return await session.query(client, timeout)
+
+
+async def poll_status(path, address, timeout, interval, count):
+    matches, key = status_identity(path, address)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    samples = connections = failures = consecutive_failures = 0
+    try:
+        while count == 0 or samples < count:
+            try:
+                async with connected_status(matches, key, timeout) as (client, session):
+                    connections += 1
+                    while count == 0 or samples < count:
+                        query_started = loop.time()
+                        status = await session.query(client, timeout)
+                        samples += 1
+                        consecutive_failures = 0
+                        print(
+                            json.dumps(
+                                {
+                                    "timestamp": datetime.now(UTC).isoformat(),
+                                    "sample": samples,
+                                    "connection": connections,
+                                    "transport_failures": failures,
+                                    "query_ms": round(
+                                        (loop.time() - query_started) * 1000, 1
+                                    ),
+                                    "status": status,
+                                },
+                                ensure_ascii=True,
+                            ),
+                            flush=True,
+                        )
+                        if count and samples >= count:
+                            return
+                        try:
+                            await asyncio.wait_for(
+                                session.disconnected.wait(), interval
+                            )
+                        except TimeoutError:
+                            continue
+                        raise BleakError("Device disconnected between polls")
+            except (BleakError, TimeoutError) as error:
+                failures += 1
+                consecutive_failures += 1
+                if consecutive_failures >= STATUS_ATTEMPTS:
+                    raise RuntimeError(
+                        f"Polling stopped after {STATUS_ATTEMPTS} consecutive transport failures: {error}"
+                    ) from error
+                print(
+                    f"BLE polling failure {consecutive_failures}/{STATUS_ATTEMPTS}: {error}; reconnecting",
+                    file=sys.stderr,
+                )
+                await asyncio.sleep(RECONNECT_DELAY)
+    finally:
+        print(
+            f"Polling summary: samples={samples} connections={connections} transport_failures={failures} elapsed_s={loop.time() - started:.1f}",
+            file=sys.stderr,
+        )
 
 
 def main():
@@ -427,6 +499,24 @@ def main():
     parser.add_argument("--address", help="BLE address of your unit")
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--scan-only", action="store_true", help="No cloud requests")
+    parser.add_argument(
+        "--poll",
+        type=Path,
+        metavar="KEY_FILE",
+        help="Poll model-12 BLE status on one connection; JSON lines on stdout",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="Seconds between a poll response and the next request (default 5)",
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=0,
+        help="Stop after this many successful polls; 0 means until Ctrl-C",
+    )
     parser.add_argument(
         "--status",
         type=Path,
@@ -449,6 +539,23 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if not math.isfinite(args.interval) or args.interval <= 0:
+        parser.error("--interval must be positive")
+    if args.count < 0:
+        parser.error("--count must be nonnegative")
+    if args.poll:
+        if args.status or args.bind or args.scan_only:
+            parser.error(
+                "--poll cannot be combined with --status, --bind, or --scan-only"
+            )
+        asyncio.run(
+            poll_status(
+                args.poll, args.address, args.timeout, args.interval, args.count
+            )
+        )
+        return
+    if args.count or args.interval != 5.0:
+        parser.error("--count and --interval require --poll")
     if args.status:
         if args.bind or args.scan_only:
             parser.error("--status cannot be combined with --bind or --scan-only")

@@ -114,7 +114,7 @@ unit was unbound before bootstrap; cache extraction was not needed.
 The Python PoC in `tools/jackery_key.py` uses Bleak to decode advertisements,
 then reproduces login and either key lookup or explicit Explorer binding.
 See README.md for uv commands and docs/protocol.md for wire details.
-Fourteen offline tests pass. A live Bleak scan decoded the test unit as model
+Twenty-one offline tests pass. A live Bleak scan decoded the test unit as model
 12, battery 100, bind/reset counter 3, with a six-byte GUID. After the
 user completed login and a local key file appeared, the PoC successfully
 used that key for an encrypted BLE status query. No cloud requests were
@@ -146,6 +146,73 @@ performed yet" after Bleak cleared its services. The PoC now relies on
 disconnect cleanup and retries transport failures up to three times. A live
 test recovered from a first-attempt disconnect and returned status on the
 second attempt. The cause of the peripheral disconnect remains unknown.
+
+The PoC now supports persistent polling, keeping one connection and
+subscription between queries. Each query uses a fresh decoder. JSON-line
+records expose successful connections, transport failures, and query
+latency so repeated polling can measure reliability.
+
+A live `--interval 5 --count 12` run completed in 62.4 seconds: 12 samples,
+one connection, zero transport failures. Query latency ranged from 214.4
+to 306.4 ms. All samples reported `rb=100`, `bt=332`, `ip=0`, `op=0`, and
+`ec=0`. Wi-Fi credentials were absent throughout, as in the earlier tests.
+This validates a short persistent session, not long-duration reliability.
+
+A subsequent 60-sample run stopped after 24.1 seconds with zero samples:
+one discovery miss, followed by two disconnects before a status request.
+The configured three-consecutive-failure limit stopped it cleanly. Two
+subscriptions were established but produced no samples. Sleep or another
+BLE client has not been established as the cause.
+
+After the user manually enabled USB, AC, and the light, a new 60-sample
+run completed in 313.4 seconds on one connection with zero transport
+failures. Query latency: minimum 212.4 ms, median 216.2 ms, nearest-rank
+p95 303.4 ms, maximum 351.3 ms. All samples reported `oac=1`, `odc=1`,
+`lm=1`, `op=1`, `ip=0`, `rb=100`, and `ec=0`. Battery temperature ranged
+from 33.1 to 33.2 C; AC voltage from 120.5 to 121.4 V, frequency 59-60 Hz.
+This validates five minutes of polling and reports the manually changed
+output states. It does not prove enabling outputs prevents disconnects,
+and voltage/power measurements were not independently calibrated.
+
+No battery current or battery power field appeared. The app's battery
+power chart references found during review belong to its home-system UI.
+Do not infer measured battery drain from the reported 1 W output.
+
+On 2026-10-05, the user power-cycled the unit. A saved-key polling run
+collected no samples: GATT/service-discovery failures exhausted three
+attempts in 18.4 seconds. A second run with a 15-second scan timeout
+missed the saved device in all three scans (47.1 seconds total). Neither
+run established a notification subscription or decoded a response. No
+login/key refresh was performed. Key persistence across power-cycle is
+therefore still unverified; these transport failures are not evidence
+that the key changed.
+
+Follow-up raw scans saw 35-47 other devices but no Jackery-like advertisement,
+even while the user reported blinking Wi-Fi/Bluetooth icons. Host BlueZ
+5.79 logged repeated failures to register discovered device interfaces.
+Those errors returned after the user restarted Bluetooth; a saved-key
+retry then missed the unit in all three scans (47.2 seconds). The logged
+registration failures named other devices, not the Jackery, so their
+causal relationship to this failure is unproven. A controller-level capture
+could show whether advertisements arrive below BlueZ's device registration
+layer; a second receiver could independently check discovery. An unprivileged
+`btmon` attempt failed with `Operation not permitted`, so no controller capture
+was collected. The assistant must not run sudo; the user handles privileged
+host maintenance.
+
+The user then collected `/tmp/jackery-radio.btsnoop` with privileged `btmon`.
+The capture contains a 20-second active scan accepting all advertisements:
+2,248 advertising-report events from 37 distinct addresses, with all 16
+command status results successful. No saved Jackery address/prefix, HT/HL
+name, serial, bdee UUID, or category-2 manufacturer identifier appeared.
+Thus no recognizable Jackery advertisement reached the captured HCI layer
+during that scan; Bleak filtering or BlueZ device registration alone cannot
+explain this capture. This does not distinguish peripheral advertising state,
+interference, or controller reception trouble. The user had nabemono next to
+the unit around the middle of the run, making simple distance less likely;
+the exact proximity interval was not timestamped. Eight reports used an
+all-zero address; their significance is unknown. Key persistence remains
+untested because discovery still fails before authentication.
 
 ## Open questions
 

@@ -2,9 +2,8 @@
 
 ## Project
 
-Rust library, logging daemon, TUI, promtheus exporter for Jackery
-units that can do MQTT.  To begin, we will talk only via IP but may
-look at BLE in future work.
+Rust library, logging daemon, TUI, Prometheus exporter for Jackery
+units over BLE.  IP/MQTT was ruled out for the Explorer; see `FINDINGS.md`.
 
 - `PLAN.md` records why things are the way they are.  Read it before
   proposing architectural changes, and update it when a decision

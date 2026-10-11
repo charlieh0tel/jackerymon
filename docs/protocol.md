@@ -29,6 +29,19 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `ec` | error code | |
 
 Some models combine DC output into `odc`; others split `odcu`/`odcc`.
+On the test Explorer 2000, enabling USB, AC, and the light manually
+changed the reported state to `odc=1`, `oac=1`, `lm=1`. Its response did
+not include separate `odcu`/`odcc` fields. AC voltage was `acov=1209`
+(120.9 V); output power was `op=1` W. This is a state check, not an
+independent calibration of the voltage or power readings.
+
+No explicit battery-current, battery-voltage, or battery-power measurement
+has appeared in this Explorer's status responses. `ip`/`op` are input/output
+power; their difference must not be labeled measured battery power because
+internal consumption and conversion losses may be excluded. The APK's
+"Battery power" chart references found in this investigation are in the
+home-system UI, not the Explorer portable UI. Other commands or firmware
+may expose additional telemetry; this has not been established.
 
 ## Local MQTT (official; SolarVault3 line)
 
@@ -169,6 +182,21 @@ Obtaining the key without cloud bootstrap remains unresolved.
 The PoC's `StatusSession` owns one pending query and its decoder. It
 ignores notifications outside a pending request and rejects overlapping
 queries; disconnects fail the current query immediately.
+
+`--poll` keeps one GATT connection and notification subscription across
+queries. It discards notifications outside pending requests and starts a
+fresh decoder per request. Queries run sequentially, with a configurable
+delay after each completed response. Timeouts close the connection before
+retrying, preventing reuse of that connection's partial response. The wire
+format has no per-query sequence number; an unsolicited/delayed action-6
+message arriving during a query cannot be conclusively distinguished from
+its response. This remains a limitation of the experimental poller.
+Live validation produced 12 successive decoded responses over one
+connection (five-second response-to-request delay), with no transport
+failures. The run lasted 62.4 seconds including setup and teardown.
+A later run with USB, AC, and light enabled returned 60 responses on one
+connection in 313.4 seconds, again without transport failures. Median
+query latency was 216.2 ms; p95 was 303.4 ms.
 
 ### Commands
 
