@@ -61,11 +61,7 @@ units over BLE.  IP/MQTT was ruled out for the Explorer; see `FINDINGS.md`.
 - Only comment unintuitive or hard to understand code.
 - Always comment data structures.
 - Don't abbreviate by dropping letters from the middle of a word.
-  Truncation (cutting from the end) is OK: `repeater` can shorten
-  to `rep` or `repeat` but not to `rpt`.  Domain acronyms / wire-
-  protocol terms are fine -- `scpi`, `gps`, `gpsdo`, `ocxo`, `efc`,
-  `tfom`, `ffom`, `prn`, `pps`, `ti`, `utc`, `tai`, `rs232`, `uart`,
-  `rx`, `tx`, `led`, `idn`, `tcode`, `emangle`, `adelay`.
+  Truncation (cutting from the end) is OK.
 
 
 ## Rust Rules
