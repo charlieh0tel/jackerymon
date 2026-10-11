@@ -262,6 +262,8 @@ pub struct Status {
     pub battery_protection: Option<BatteryProtection>,
     /// `ec`; 0 means no error, n shows as fault F(n-1) in the app.
     pub error_code: Option<i64>,
+    /// `acip`
+    pub ac_input_watts: Option<u32>,
     /// `cip`
     pub car_input_watts: Option<u32>,
     /// `acpsp`; the app adds it to `cip` as DC input.
@@ -304,6 +306,7 @@ impl TryFrom<RawStatus> for Status {
             ups: flag(&raw, "ups")?,
             battery_protection: integer::<i64>(&raw, "lps")?.map(BatteryProtection::from),
             error_code: integer(&raw, "ec")?,
+            ac_input_watts: integer(&raw, "acip")?,
             car_input_watts: integer(&raw, "cip")?,
             solar_input_watts: tenths(&raw, "acpsp")?,
             auto_off: integer::<u32>(&raw, "ast")?.map(OffTimer::from),
@@ -403,6 +406,7 @@ mod tests {
         assert_eq!(status.emergency_charge, Some(false));
         assert_eq!(status.temperature_alarm, Some(TemperatureAlarm::None));
         assert_eq!(status.solar_input_watts, Some(0.0));
+        assert_eq!(status.ac_input_watts, Some(0));
     }
 
     #[test]

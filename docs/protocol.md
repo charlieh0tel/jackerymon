@@ -30,7 +30,7 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `cip` | car (12 V) input power | W |
 | `acpsp` | solar (MPPT) input power; app adds it to `cip` as DC input | /10 -> W |
 | `acpss` | solar input present; app shows MPPT icon when nonzero | |
-| `acip` | AC input present; app shows AC icon when nonzero | |
+| `acip` | AC input power; app shows AC icon when nonzero | W |
 | `ast` | auto power-off under light load on battery | min, 0 never |
 | `pm` | energy saving: outputs off at no/light load | min, 0 never |
 | `pmb` | energy saving active; app shows low-power icon when nonzero | |
@@ -58,6 +58,15 @@ between `csl` and `cst` (`SettingChargeActivity.java`,
 `PowerSettingSeekBar.java`); the app shows it only when `C()` is true,
 which it is not for model 12, and the test unit reports no `csl`, `cst`,
 or `csc`. The app also hides the charging mode while `sfc` is on.
+
+Live (2026-10-11, charging from AC): `{"cs":2}` on action 21 and
+`{"csc":500}` on action 38 were both acknowledged with result code 0,
+but each acknowledgment body was `{"cs":0}` and status kept `cs=0`: the
+firmware ignores custom charging without reporting an error. An
+acknowledgment body carries the resulting state, not an echo of the
+request; the light acknowledgments matched their requests only because
+they were applied. Pushes during the run included
+`{"ip":426,"acip":426}`, so `acip` is AC input power in watts.
 
 The app has a "Bluetooth/Wi-Fi auto-off" setting (key `tmt`, command 44,
 `SETTING_BLUETOOTH_MODULE_SLEEP_TIME`), but hides it for model 12

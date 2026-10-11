@@ -301,6 +301,10 @@ fn power_panel(status: Option<&Status>) -> Paragraph<'static> {
         )
         .fg(OUTPUT_COLOR),
         row(
+            "AC in",
+            field(|status| status.ac_input_watts.map(|watts| format!("{watts} W"))),
+        ),
+        row(
             "Car in",
             field(|status| status.car_input_watts.map(|watts| format!("{watts} W"))),
         ),

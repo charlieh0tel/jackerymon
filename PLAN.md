@@ -106,7 +106,9 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
   only. The TUI asks y/n before either; `jackerymon set` requires `--yes`.
 - **No custom charge power.** Action 38 (`csc`, watts in 100 W steps,
   bounded by `csl`/`cst`) is decoded, but the app hides custom charging
-  for model 12 and the unit reports none of those keys.
+  for model 12, the unit reports none of those keys, and a live test
+  showed the firmware acknowledging `cs=2` and `csc` without applying
+  them.
 - **TUI control is a settings menu.** One key opens a menu of every
   control; arrows and Enter choose.
 - **Key bootstrap path unrecorded.** The 2026-10-04 key came from either
