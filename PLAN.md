@@ -120,6 +120,21 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
 - **Key bootstrap path unrecorded.** The 2026-10-04 key came from either
   `device/bluetoothKey` or `--bind`; the user does not remember which.
 
+- **Daemon design.** `jackerymon daemon` owns the BLE connection and
+  retries forever. HTTP on `127.0.0.1:9888` by default: `GET /metrics`
+  (Prometheus text), `GET /status` (latest sample and link state, JSON),
+  `GET /events` (server-sent events of samples and link changes),
+  `POST /settings` (apply one setting; answers after status confirms).
+  Optional `--log-dir` writes daily `YYYY-MM-DD.jsonl` files in the
+  `poll` line format; pruning is left to logrotate or tmpfiles.
+  `jackerymon tui --daemon URL` reads `/events` and posts settings;
+  without it the TUI still connects directly. axum serves HTTP.
+- **Daemon risks accepted.** The control endpoint has no authentication,
+  so the default bind is localhost and the docs warn before exposing it.
+  Readings older than 60 s are not exported, so Prometheus never shows
+  stale values as live; `jackery_connected` and the last sample time are.
+  The daemon holds the unit's only connection, locking out the phone app.
+
 ## Next steps and open questions
 
 1. Measure polling reliability and diagnose intermittent disconnects.
