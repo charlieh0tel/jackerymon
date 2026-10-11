@@ -1,7 +1,17 @@
 # jackerymon
 
-Direct monitoring research for Jackery power stations. No Rust workspace
-yet; see [PLAN.md](PLAN.md) and [FINDINGS.md](FINDINGS.md).
+Direct BLE monitoring for Jackery power stations; see [PLAN.md](PLAN.md)
+and [FINDINGS.md](FINDINGS.md).
+
+## Rust library
+
+`crates/jackerymon` holds the protocol: advertisement decoding, the
+model-12 GATT frame codec, key-file loading, and typed status. BLE
+transport is not ported yet.
+
+```sh
+cargo test
+```
 
 ## Python BLE PoC
 

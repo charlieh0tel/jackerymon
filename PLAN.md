@@ -31,8 +31,9 @@ After a 2026-10-05 power-cycle the unit stopped advertising for days
 (no Jackery advertisement at the HCI layer); by 2026-10-10 it was back,
 cause unknown. The saved key then still worked: it survives power-cycle.
 
-No Rust code is written yet. The Python PoC provides a reference for
-the eventual Rust BLE backend.
+The Rust library `crates/jackerymon` ports the codec, advertisement
+decoding, key-file loading, and typed status from the PoC, with offline
+tests. BLE transport is not ported yet. Key bootstrap stays in Python.
 
 ## Decisions
 
@@ -67,10 +68,23 @@ the eventual Rust BLE backend.
   (use `btmon`/journal instead), no passive advertisement monitoring,
   no adapter control. Keep BLE in one small module so a switch to
   `bluer` stays cheap if disconnect diagnosis needs it.
-- **Property model follows the BLE wire keys.** Use a typed model for
-  battery percentage, temperature, input/output power, and output states.
-  Preserve unknown fields during research; do not invent battery-current
-  or battery-power measurements from input/output totals.
+- **Property model follows the BLE wire keys.** `Status` types the
+  documented keys and keeps every field in `raw`. Absent keys are `None`;
+  wrong types fail; unknown enum values are kept as `Unknown`. Do not
+  invent battery-current or battery-power measurements from input/output
+  totals.
+- **TUI first, daemon later.** The unit accepts one BLE connection, so
+  eventually one daemon owns it: it polls, logs JSON lines, serves
+  Prometheus `/metrics`, and serves HTTP JSON to the TUI.  To start,
+  the TUI connects directly. It consumes a stream of samples, not BLE,
+  so the daemon can replace the source without TUI changes. The TUI does
+  not log. While it runs, the phone app cannot connect.
+- **Workspace grows by need.** `crates/jackerymon` (library, typed errors,
+  no `anyhow`) now; a JSON-lines poller binary, `jackerymon-tui`, and
+  later `jackerymond` are added when started. Monitoring only; control
+  commands later.
+- **Key bootstrap stays in Python.** The cloud login is a one-time step;
+  porting it buys nothing yet.
 
 ## Next steps and open questions
 
@@ -80,7 +94,10 @@ the eventual Rust BLE backend.
    and which button restores them.
 2. Compare telemetry with the display under a known load.
 3. Reset/unbinding effect on the key remains unknown.
-4. Port the validated BLE session, codec, and property model to Rust.
+4. Port the BLE session (btleplug) and a JSON-lines poller binary;
+   validate against the unit.
+5. TUI: battery, input/output power, temperature, output states, error
+   code, connection state, data age, power chart.
 
 ## Housekeeping
 
