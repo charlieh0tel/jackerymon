@@ -28,10 +28,11 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::advertisement;
+use crate::frame::Action;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
-use crate::frame::StatusDecoder;
-use crate::frame::status_command;
+use crate::frame::Request;
+use crate::frame::ResponseDecoder;
 use crate::identity::BleKey;
 use crate::key_file::KeyFile;
 use crate::poll::Connector;
@@ -234,12 +235,12 @@ struct Connection {
 
 impl Link for Connection {
     async fn query(&mut self, limit: Duration) -> Result<RawStatus, BleError> {
-        let mut decoder = StatusDecoder::new(self.key.clone());
+        let mut decoder = ResponseDecoder::new(self.key.clone(), Action::READ_DEVICE_INFO);
         let mask = NonZeroU8::new(rand::random_range(1..=u8::MAX)).expect("mask is nonzero");
         self.peripheral
             .write(
                 &self.command,
-                &status_command(&self.key, mask),
+                &Request::status().encode(&self.key, mask),
                 WriteType::WithoutResponse,
             )
             .await?;

@@ -1,4 +1,4 @@
-//! Model-12 GATT framing: the status request and response reassembly.
+//! Model-12 GATT framing: requests and response reassembly.
 //!
 //! Inner frame: `DFEC`, flags/result byte, action, message type, body
 //! length, optional page index and count, body.  Every byte is XORed by a
@@ -17,8 +17,6 @@ use crate::cipher::rc4;
 use crate::identity::BleKey;
 
 const FRAME_HEADER: [u8; 2] = [0xdf, 0xec];
-const READ_DEVICE_INFO: u8 = 6;
-const QUERY_PROPERTY: u8 = 3;
 const PAGINATED_FLAG: u8 = 0x80;
 const RESULT_CODE_MASK: u8 = 0x7f;
 const HEADER_LENGTH: usize = 6;
@@ -47,8 +45,8 @@ pub enum DecodeError {
     InvalidHeader,
     #[error("invalid BLE CRC or XOR mask")]
     InvalidChecksum,
-    #[error("device status query failed with code {0}")]
-    Device(u8),
+    #[error("device rejected action {action} with code {code}")]
+    Device { action: u8, code: u8 },
     #[error("invalid BLE pagination")]
     InvalidPagination,
     #[error("inconsistent BLE pagination")]
@@ -57,31 +55,66 @@ pub enum DecodeError {
     ConflictingPage,
     #[error("invalid status JSON: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("expected a JSON object in BLE status response")]
+    #[error("expected a JSON object in BLE response")]
     NotObject,
 }
 
-/// Encrypted read-device-info request.  The app picks `mask` at random for
-/// each packet.
-#[must_use]
-pub fn status_command(key: &BleKey, mask: NonZeroU8) -> Vec<u8> {
-    let frame = [
-        FRAME_HEADER[0],
-        FRAME_HEADER[1],
-        0,
-        READ_DEVICE_INFO,
-        QUERY_PROPERTY,
-        0,
-    ];
-    let wrapped: Vec<u8> = frame
-        .iter()
-        .map(|byte| byte ^ mask.get())
-        .chain([mask.get()])
-        .collect();
-    rc4(
-        &[wrapped.clone(), crc16(&wrapped).to_vec()].concat(),
-        key.as_bytes(),
-    )
+/// Message id; the device answers on the same action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Action(pub(crate) u8);
+
+impl Action {
+    pub(crate) const READ_DEVICE_INFO: Self = Self(6);
+}
+
+/// Second header byte after the action: what kind of message it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MessageType(pub(crate) u8);
+
+impl MessageType {
+    pub(crate) const QUERY_PROPERTY: Self = Self(3);
+}
+
+/// One unpaginated request frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Request {
+    pub(crate) action: Action,
+    pub(crate) message_type: MessageType,
+    /// At most 255 bytes, the one-byte length limit.
+    pub(crate) body: Vec<u8>,
+}
+
+impl Request {
+    pub(crate) fn status() -> Self {
+        Self {
+            action: Action::READ_DEVICE_INFO,
+            message_type: MessageType::QUERY_PROPERTY,
+            body: Vec::new(),
+        }
+    }
+
+    /// Encrypts the frame.  The app picks `mask` at random for each packet.
+    pub(crate) fn encode(&self, key: &BleKey, mask: NonZeroU8) -> Vec<u8> {
+        let length = u8::try_from(self.body.len()).expect("request bodies fit one frame");
+        let header = [
+            FRAME_HEADER[0],
+            FRAME_HEADER[1],
+            0,
+            self.action.0,
+            self.message_type.0,
+            length,
+        ];
+        let wrapped: Vec<u8> = header
+            .iter()
+            .chain(&self.body)
+            .map(|byte| byte ^ mask.get())
+            .chain([mask.get()])
+            .collect();
+        rc4(
+            &[wrapped.clone(), crc16(&wrapped).to_vec()].concat(),
+            key.as_bytes(),
+        )
+    }
 }
 
 /// Header fields every page of one paginated response must share.
@@ -92,10 +125,12 @@ struct Pagination {
     message_type: u8,
 }
 
-/// Reassembles one status response from notification fragments.  Use a
-/// fresh decoder for each request.
-pub struct StatusDecoder {
+/// Reassembles the response to one request from notification fragments.
+/// Use a fresh decoder for each request.
+pub(crate) struct ResponseDecoder {
     key: BleKey,
+    /// Packets for other actions, such as property pushes, are skipped.
+    action: Action,
     /// Undecoded bytes, starting at a packet boundary.
     buffer: Vec<u8>,
     /// Bodies of the pages received so far, by page index.
@@ -104,11 +139,11 @@ pub struct StatusDecoder {
     received: usize,
 }
 
-impl StatusDecoder {
-    #[must_use]
-    pub fn new(key: BleKey) -> Self {
+impl ResponseDecoder {
+    pub(crate) fn new(key: BleKey, action: Action) -> Self {
         Self {
             key,
+            action,
             buffer: Vec::new(),
             pages: BTreeMap::new(),
             pagination: None,
@@ -117,19 +152,14 @@ impl StatusDecoder {
     }
 
     /// Notification bytes fed so far.
-    #[must_use]
-    pub fn received(&self) -> usize {
+    pub(crate) fn received(&self) -> usize {
         self.received
     }
 
-    /// Feeds one notification.  Returns the status once the response is
-    /// complete; packets for other actions are skipped.
-    ///
-    /// # Errors
-    ///
-    /// Fails on a wrong key, corruption, inconsistent pages, a device
-    /// result code, or a body that is not a JSON object.
-    pub fn feed(&mut self, fragment: &[u8]) -> Result<Option<RawStatus>, DecodeError> {
+    /// Feeds one notification.  Returns the JSON body once the response
+    /// is complete.  Fails on a wrong key, corruption, inconsistent pages,
+    /// a device result code, or a body that is not a JSON object.
+    pub(crate) fn feed(&mut self, fragment: &[u8]) -> Result<Option<RawStatus>, DecodeError> {
         self.received += fragment.len();
         if self.received > MAX_RESPONSE_BYTES {
             return Err(DecodeError::TooLarge);
@@ -159,12 +189,15 @@ impl StatusDecoder {
                 return Err(DecodeError::InvalidChecksum);
             }
             self.buffer.drain(..packet_length);
-            if frame[ACTION_OFFSET] != READ_DEVICE_INFO {
+            if frame[ACTION_OFFSET] != self.action.0 {
                 continue;
             }
             let code = frame[FLAGS_OFFSET] & RESULT_CODE_MASK;
             if code != 0 {
-                return Err(DecodeError::Device(code));
+                return Err(DecodeError::Device {
+                    action: self.action.0,
+                    code,
+                });
             }
             let body = &frame[header_length..packet_length - TRAILER_LENGTH];
             let body = if paginated {
@@ -175,7 +208,7 @@ impl StatusDecoder {
             } else {
                 body.to_vec()
             };
-            return parse_status(&body).map(Some);
+            return parse_object(&body).map(Some);
         }
         Ok(None)
     }
@@ -212,7 +245,7 @@ impl StatusDecoder {
     }
 }
 
-fn parse_status(body: &[u8]) -> Result<RawStatus, DecodeError> {
+fn parse_object(body: &[u8]) -> Result<RawStatus, DecodeError> {
     if body.is_empty() {
         return Ok(RawStatus::new());
     }
@@ -228,11 +261,13 @@ mod tests {
 
     use serde_json::json;
 
+    use super::Action;
     use super::DecodeError;
     use super::MAX_RESPONSE_BYTES;
+    use super::MessageType;
     use super::RawStatus;
-    use super::StatusDecoder;
-    use super::status_command;
+    use super::Request;
+    use super::ResponseDecoder;
     use crate::cipher::crc16;
     use crate::cipher::rc4;
     use crate::identity::BleKey;
@@ -240,6 +275,10 @@ mod tests {
 
     const KEY: &[u8] = b"test-key";
     const MASK: u8 = 0x42;
+
+    fn status_decoder(key: BleKey) -> ResponseDecoder {
+        ResponseDecoder::new(key, Action::READ_DEVICE_INFO)
+    }
 
     fn key() -> BleKey {
         BleKey::new(KEY.to_vec()).expect("nonempty key")
@@ -268,7 +307,7 @@ mod tests {
 
     #[test]
     fn status_command_layout() {
-        let packet = status_command(&key(), NonZeroU8::MIN);
+        let packet = Request::status().encode(&key(), NonZeroU8::MIN);
         let wrapped = rc4(&packet, KEY);
         assert_eq!(wrapped[..wrapped.len() - 3], hex("deed01070201"));
         assert_eq!(wrapped[wrapped.len() - 3], 1);
@@ -279,10 +318,30 @@ mod tests {
     }
 
     #[test]
+    fn request_with_body_layout() {
+        let request = Request {
+            action: Action(17),
+            message_type: MessageType(4),
+            body: br#"{"lm":1}"#.to_vec(),
+        };
+        let wrapped = rc4(&request.encode(&key(), NonZeroU8::MIN), KEY);
+        let unmasked: Vec<u8> = wrapped[..wrapped.len() - 3]
+            .iter()
+            .map(|byte| byte ^ 1)
+            .collect();
+        assert_eq!(unmasked[..6], hex("dfec00110408"));
+        assert_eq!(&unmasked[6..], br#"{"lm":1}"#);
+        assert_eq!(
+            wrapped[wrapped.len() - 2..],
+            crc16(&wrapped[..wrapped.len() - 2])
+        );
+    }
+
+    #[test]
     fn fragmented_and_coalesced_pages() {
         let second = response(b"100}", Some((2, 2)), 0);
         let first = response(br#"{"rb":"#, Some((1, 2)), 0);
-        let mut decoder = StatusDecoder::new(key());
+        let mut decoder = status_decoder(key());
         assert!(decoder.feed(&second[..3]).expect("partial").is_none());
         let rest = [&second[3..], &first[..]].concat();
         assert_eq!(
@@ -299,7 +358,7 @@ mod tests {
         wrapped.truncate(wrapped.len() - 2);
         let crc = crc16(&wrapped);
         other = rc4(&[wrapped, crc.to_vec()].concat(), KEY);
-        let mut decoder = StatusDecoder::new(key());
+        let mut decoder = status_decoder(key());
         assert!(decoder.feed(&other).expect("skipped").is_none());
         assert_eq!(
             decoder.feed(&response(b"", None, 0)).expect("empty"),
@@ -312,23 +371,23 @@ mod tests {
         let mut corrupted = response(br#"{"rb":100}"#, None, 0);
         *corrupted.last_mut().expect("nonempty") ^= 1;
         assert!(matches!(
-            StatusDecoder::new(key()).feed(&corrupted),
+            status_decoder(key()).feed(&corrupted),
             Err(DecodeError::InvalidChecksum)
         ));
         let wrong = BleKey::new(b"wrong-key".to_vec()).expect("nonempty key");
         assert!(matches!(
-            StatusDecoder::new(wrong).feed(&response(br#"{"rb":100}"#, None, 0)),
+            status_decoder(wrong).feed(&response(br#"{"rb":100}"#, None, 0)),
             Err(DecodeError::InvalidHeader)
         ));
         assert!(matches!(
-            StatusDecoder::new(key()).feed(&response(b"", None, 1)),
-            Err(DecodeError::Device(1))
+            status_decoder(key()).feed(&response(b"", None, 1)),
+            Err(DecodeError::Device { action: 6, code: 1 })
         ));
     }
 
     #[test]
     fn rejects_bad_pages() {
-        let mut decoder = StatusDecoder::new(key());
+        let mut decoder = status_decoder(key());
         assert!(
             decoder
                 .feed(&response(br#"{"rb":"#, Some((1, 2)), 0))
@@ -339,7 +398,7 @@ mod tests {
             decoder.feed(&response(br#"{"op":"#, Some((1, 2)), 0)),
             Err(DecodeError::ConflictingPage)
         ));
-        let mut decoder = StatusDecoder::new(key());
+        let mut decoder = status_decoder(key());
         assert!(
             decoder
                 .feed(&response(b"{", Some((1, 2)), 0))
@@ -351,7 +410,7 @@ mod tests {
             Err(DecodeError::InconsistentPagination)
         ));
         assert!(matches!(
-            StatusDecoder::new(key()).feed(&response(b"{}", Some((3, 2)), 0)),
+            status_decoder(key()).feed(&response(b"{}", Some((3, 2)), 0)),
             Err(DecodeError::InvalidPagination)
         ));
     }
@@ -359,10 +418,10 @@ mod tests {
     #[test]
     fn rejects_non_object_and_oversize() {
         assert!(matches!(
-            StatusDecoder::new(key()).feed(&response(b"[1]", None, 0)),
+            status_decoder(key()).feed(&response(b"[1]", None, 0)),
             Err(DecodeError::NotObject)
         ));
-        let mut decoder = StatusDecoder::new(key());
+        let mut decoder = status_decoder(key());
         assert!(matches!(
             decoder.feed(&vec![0; MAX_RESPONSE_BYTES + 1]),
             Err(DecodeError::TooLarge)
