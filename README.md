@@ -57,6 +57,46 @@ matches the PoC's `--poll` JSON lines, except that keys inside `status` are
 sorted.
 Linux needs BlueZ and the D-Bus development headers to build.
 
+## Daemon
+
+`jackerymon daemon` owns the unit's BLE connection, polls it, and serves
+HTTP on `127.0.0.1:9888` (`--listen` to change):
+
+| Route | Gives |
+|---|---|
+| `GET /status` | link state, counters, and the latest sample (JSON) |
+| `GET /metrics` | Prometheus metrics, `jackery_*`, labeled by serial |
+| `GET /events` | server-sent events: current state, then every change |
+| `POST /settings` | apply one setting, e.g. `{"lm":1}`; answers once status confirms it |
+
+```sh
+cargo run --release -- daemon --log-dir /var/log/jackerymon
+curl -s localhost:9888/metrics
+curl -s -X POST -H 'content-type: application/json' -d '{"oac":1}' \
+    localhost:9888/settings
+cargo run --release -- tui --daemon http://127.0.0.1:9888
+```
+
+`POST /settings` takes the unit's own one-key body (keys and values in
+`docs/protocol.md`, Control). Emergency charging needs `?confirm=true`.
+A request waits up to 60 s, including for the unit to come back; one
+still queued then is never sent. The API has no authentication and can
+switch outputs, so bind it beyond localhost only on a trusted network.
+
+Readings older than 60 s are left out of `/metrics`, so a unit that has
+gone quiet never looks live; `jackery_connected` and
+`jackery_last_sample_timestamp_seconds` show what happened. `--log-dir`
+writes one `YYYY-MM-DD.jsonl` file per UTC day in the `poll` line format,
+about 10 MB a day at the default 5 s interval.
+
+`tui --daemon` follows the daemon instead of connecting to the unit, so
+the TUI and the daemon can run together. While the daemon runs, the
+phone app cannot connect.
+
+`contrib/systemd/` has a service unit and a tmpfiles rule that prunes
+logs after 30 days. Neither has been tested; check the unit's user,
+group, and paths against your system before installing it.
+
 ## Python BLE PoC
 
 Requires Python 3.11+, uv, and a working Bluetooth adapter. On Linux,

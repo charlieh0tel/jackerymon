@@ -1,0 +1,25 @@
+# Runs `jackerymon daemon`.  Untested; see README.md, "Daemon".
+[Unit]
+Description=Jackery BLE monitor
+Wants=bluetooth.target
+After=bluetooth.target
+
+[Service]
+User=jackerymon
+# BlueZ's D-Bus policy grants device access to this group on many
+# distributions; check /etc/dbus-1/system.d/bluetooth.conf on yours.
+SupplementaryGroups=bluetooth
+ConfigurationDirectory=jackerymon
+LogsDirectory=jackerymon
+ExecStart=/usr/local/bin/jackerymon daemon \
+    --key-file /etc/jackerymon/jackery-key.json \
+    --log-dir /var/log/jackerymon
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

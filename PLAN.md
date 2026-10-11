@@ -35,7 +35,9 @@ The Rust library `crates/jackerymon` ports the codec, advertisement
 decoding, key-file loading, typed status, btleplug transport, and the
 poller from the PoC, with offline tests. `jackerymon poll` matched the
 PoC's live results on its first run, and `jackerymon tui` shows live
-status, and `jackerymon set` and the TUI settings menu change settings. Key bootstrap stays in Python.
+status, `jackerymon set` and the TUI settings menu change settings, and
+`jackerymon daemon` serves status, metrics, and settings over HTTP.
+Key bootstrap stays in Python.
 
 ## Decisions
 
@@ -144,8 +146,8 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
    keeps them on.
 2. Compare telemetry with the display under a known load.
 3. Reset/unbinding effect on the key remains unknown.
-4. Daemon: poll, log JSON lines, serve `/metrics` and HTTP JSON; point
-   the TUI at it.
+4. Test the systemd unit; run the daemon for days to measure dropouts and
+   whether polling keeps the radios on.
 
 ## Housekeeping
 

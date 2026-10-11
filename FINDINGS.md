@@ -281,6 +281,14 @@ AC control works: `jackerymon set ac on` was confirmed in 6.0 seconds
 the light on high, seen in the same status reads, were set by the user
 from the TUI menu.
 
+The daemon (2026-10-11) served `/status`, `/metrics`, and `/events`
+from a live connection; `/events` replayed the current state, then
+streamed samples every 5.3 seconds. `POST /settings` set the light low
+and off in about 0.35 seconds each over the held connection, and
+refused an unconfirmed emergency charge (409), `{"lm":9}`, and an
+empty body (400) without sending anything. `tui --daemon` showed live
+status and set the light low and off through the daemon.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
