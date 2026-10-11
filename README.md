@@ -25,8 +25,11 @@ shows the change. Turning an output off needs `--yes`.
 
 `tui` shows battery, power, outputs, settings, faults, link state, data
 age, and a ten-minute input/output power chart. It retries forever while
-the unit is unreachable and keeps the last reading. `q`, Esc, or Ctrl-C
-quits and closes the connection. It holds the unit's only BLE
+the unit is unreachable and keeps the last reading. `m` opens a settings
+menu covering the same settings as `set`: arrows move, Enter chooses,
+Esc backs out, and turning an output off asks y/n first. The footer
+shows each change's progress and result. `q`, Esc, or Ctrl-C quits and
+closes the connection. It holds the unit's only BLE
 connection, so the phone app cannot connect while it runs.
 
 `poll` reads `jackery-key.json` (`--key-file` to change) and takes the

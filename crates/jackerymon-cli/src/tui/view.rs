@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
+use jackerymon::control::Setting;
+use jackerymon::status::BatteryProtection;
 use jackerymon::status::BatteryState;
+use jackerymon::status::ChargeSpeed;
 use jackerymon::status::LightMode;
 use jackerymon::status::OffTimer;
 use jackerymon::status::ScreenMode;
@@ -21,12 +24,16 @@ use ratatui::text::Span;
 use ratatui::widgets::Axis;
 use ratatui::widgets::Block;
 use ratatui::widgets::Chart;
+use ratatui::widgets::Clear;
 use ratatui::widgets::Dataset;
 use ratatui::widgets::Gauge;
 use ratatui::widgets::GraphType;
 use ratatui::widgets::Paragraph;
 use tokio::time::Instant;
 
+use super::menu::Control;
+use super::menu::Menu;
+use super::monitor::ControlState;
 use super::monitor::HISTORY;
 use super::monitor::Link;
 use super::monitor::Monitor;
@@ -46,8 +53,18 @@ const INPUT_COLOR: Color = Color::Green;
 const OUTPUT_COLOR: Color = Color::Yellow;
 const ALERT_COLOR: Color = Color::Red;
 const MISSING: &str = "—";
+const MENU_WIDTH: u16 = 40;
+/// Borders above and below the menu rows.
+const MENU_BORDER_HEIGHT: u16 = 2;
+const MENU_VALUE_WIDTH: usize = 20;
 
-pub(super) fn draw(frame: &mut Frame, monitor: &Monitor, now: Instant) {
+pub(super) fn draw(
+    frame: &mut Frame,
+    monitor: &Monitor,
+    menu: Menu,
+    controls: &[Control],
+    now: Instant,
+) {
     let [header, panels, chart, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(PANEL_HEIGHT),
@@ -63,6 +80,97 @@ pub(super) fn draw(frame: &mut Frame, monitor: &Monitor, now: Instant) {
     frame.render_widget(unit_panel(status), unit);
     draw_chart(frame, chart, monitor, now);
     frame.render_widget(footer_line(monitor), footer);
+    draw_menu(frame, menu, controls, status);
+}
+
+fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option<&Status>) {
+    let selected = |line: Line<'static>, chosen: bool| {
+        if chosen { line.reversed() } else { line }
+    };
+    let (title, lines) = match menu {
+        Menu::Closed => return,
+        Menu::Controls { row } => (
+            " Settings ".to_owned(),
+            controls
+                .iter()
+                .enumerate()
+                .map(|(index, control)| {
+                    let value = control
+                        .current(status)
+                        .map(|choice| setting_value_text(control.choices[choice]));
+                    selected(menu_row(control.label, value), index == row)
+                })
+                .collect(),
+        ),
+        Menu::Choices { row, choice } => {
+            let control = &controls[row];
+            let current = control.current(status);
+            (
+                format!(" {} ", control.label),
+                control
+                    .choices
+                    .iter()
+                    .enumerate()
+                    .map(|(index, setting)| {
+                        let marker = if current == Some(index) { "● " } else { "  " };
+                        let text = format!("{marker}{}", setting_value_text(*setting));
+                        selected(Line::from(text), index == choice)
+                    })
+                    .collect(),
+            )
+        }
+        Menu::Confirm { row, choice } => (
+            " Confirm ".to_owned(),
+            vec![
+                Line::from(format!(
+                    "Turn {} {}?",
+                    controls[row].label,
+                    setting_value_text(controls[row].choices[choice])
+                )),
+                Line::from("This cuts power to its loads.").fg(ALERT_COLOR),
+                Line::from("y yes   n no"),
+            ],
+        ),
+    };
+    let height = u16::try_from(lines.len()).unwrap_or(u16::MAX) + MENU_BORDER_HEIGHT;
+    let area = frame
+        .area()
+        .centered(Constraint::Length(MENU_WIDTH), Constraint::Length(height));
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(title)),
+        area,
+    );
+}
+
+fn menu_row(label: &str, value: Option<String>) -> Line<'static> {
+    Line::from(format!(
+        "{label:<MENU_VALUE_WIDTH$}{}",
+        value.unwrap_or_else(|| MISSING.to_owned())
+    ))
+}
+
+/// The value part of a setting, as the panels show it.
+fn setting_value_text(setting: Setting) -> String {
+    match setting {
+        Setting::AcOutput(on)
+        | Setting::DcOutput(on)
+        | Setting::SuperCharge(on)
+        | Setting::Ups(on) => on_off(on),
+        Setting::Light(mode) => light_text(mode),
+        Setting::Screen(mode) => screen_text(mode),
+        Setting::AutoOff(timer) | Setting::EnergySaving(timer) => timer_text(timer),
+        Setting::ChargeSpeed(speed) => match speed {
+            ChargeSpeed::Fast => "fast".to_owned(),
+            ChargeSpeed::Mute => "mute".to_owned(),
+            ChargeSpeed::Unknown(value) => format!("unknown ({value})"),
+        },
+        Setting::BatteryProtection(protection) => match protection {
+            BatteryProtection::Full => "full".to_owned(),
+            BatteryProtection::Eco => "eco".to_owned(),
+            BatteryProtection::Unknown(value) => format!("unknown ({value})"),
+        },
+    }
 }
 
 fn header_line(monitor: &Monitor, now: Instant) -> Line<'static> {
@@ -103,11 +211,26 @@ fn header_line(monitor: &Monitor, now: Instant) -> Line<'static> {
 }
 
 fn footer_line(monitor: &Monitor) -> Line<'static> {
-    Line::from(format!(
-        "q quit   samples {}   dropouts {}",
-        monitor.samples, monitor.transport_failures
-    ))
-    .dim()
+    let mut spans = vec![
+        Span::raw(format!(
+            "q quit   m settings   samples {}   dropouts {}",
+            monitor.samples, monitor.transport_failures
+        ))
+        .dim(),
+    ];
+    match &monitor.control {
+        None => {}
+        Some(ControlState::Pending(setting)) => {
+            spans.push(Span::raw(format!("   applying {setting}…")));
+        }
+        Some(ControlState::Applied(setting)) => {
+            spans.push(Span::styled(format!("   applied {setting}"), INPUT_COLOR));
+        }
+        Some(ControlState::Failed(error)) => {
+            spans.push(Span::styled(format!("   {error}"), ALERT_COLOR));
+        }
+    }
+    Line::from(spans)
 }
 
 fn draw_battery(frame: &mut Frame, area: Rect, status: Option<&Status>) {
@@ -396,6 +519,8 @@ mod tests {
     use super::draw;
     use super::fault_text;
     use super::timer_text;
+    use crate::tui::menu::Menu;
+    use crate::tui::menu::controls;
     use crate::tui::monitor::Monitor;
     use crate::tui::monitor::tests::sample;
     use jackerymon::status::OffTimer;
@@ -404,9 +529,13 @@ mod tests {
     const HEIGHT: u16 = 24;
 
     fn render(monitor: &Monitor, now: Instant) -> String {
+        render_with(monitor, Menu::Closed, now)
+    }
+
+    fn render_with(monitor: &Monitor, menu: Menu, now: Instant) -> String {
         let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("terminal");
         terminal
-            .draw(|frame| draw(frame, monitor, now))
+            .draw(|frame| draw(frame, monitor, menu, &controls(), now))
             .expect("draw");
         terminal
             .backend()
@@ -472,5 +601,18 @@ mod tests {
         assert_eq!(timer_text(OffTimer::Minutes(90)), "90 min");
         assert_eq!(fault_text(0), "none");
         assert_eq!(fault_text(3), "F2");
+    }
+
+    #[test]
+    fn menu_shows_current_values_and_confirmation() {
+        let now = Instant::now();
+        let mut monitor = Monitor::new("123456789".to_owned());
+        monitor.apply(sample(1, json!({"oac": 1, "lm": 2, "ast": 120})), now);
+        let screen = render_with(&monitor, Menu::Controls { row: 0 }, now);
+        for expected in ["Settings", "AC output", "Light", "high", "Auto-off"] {
+            assert!(screen.contains(expected), "missing {expected:?}");
+        }
+        let screen = render_with(&monitor, Menu::Confirm { row: 0, choice: 1 }, now);
+        assert!(screen.contains("Turn AC output off?"));
     }
 }

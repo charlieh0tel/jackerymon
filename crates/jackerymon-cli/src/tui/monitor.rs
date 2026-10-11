@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use jackerymon::control::Setting;
 use jackerymon::poll::PollEvent;
 use jackerymon::status::Status;
 use tokio::time::Instant;
@@ -21,6 +22,14 @@ pub(super) enum Link {
         error: String,
         consecutive: u32,
     },
+}
+
+/// Progress of the most recent setting change.
+#[derive(Debug, PartialEq)]
+pub(super) enum ControlState {
+    Pending(Setting),
+    Applied(Setting),
+    Failed(String),
 }
 
 /// One input/output power reading for the chart.
@@ -50,6 +59,7 @@ pub(super) struct Monitor {
     pub(super) history: VecDeque<PowerPoint>,
     pub(super) samples: u64,
     pub(super) transport_failures: u64,
+    pub(super) control: Option<ControlState>,
 }
 
 impl Monitor {
@@ -62,6 +72,7 @@ impl Monitor {
             history: VecDeque::new(),
             samples: 0,
             transport_failures: 0,
+            control: None,
         }
     }
 

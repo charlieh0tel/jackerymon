@@ -262,6 +262,13 @@ rerun turned it off. Details are in docs/protocol.md.
 `jackerymon set light low` and `set light off` then each succeeded,
 confirmed by a status read, in about 7.5 seconds including the scan.
 
+The TUI settings menu set the light low, confirmed in about a second.
+Setting it off, the unit disconnected before confirmation, so the TUI
+reported a connection failure; after reconnecting about 6 seconds later,
+status showed the light off. A reported transport failure therefore
+does not mean the setting was not applied; the next status is the
+truth. During that run the unit was charging at 774-929 W input.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
