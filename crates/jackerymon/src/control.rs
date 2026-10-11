@@ -41,7 +41,7 @@ pub enum Setting {
     EnergySaving(OffTimer),
     ChargeSpeed(ChargeSpeed),
     BatteryProtection(BatteryProtection),
-    SuperCharge(bool),
+    EmergencyCharge(bool),
     Ups(bool),
 }
 
@@ -56,10 +56,17 @@ pub enum ControlError {
 }
 
 impl Setting {
-    /// Turning an output off cuts power to whatever is plugged in.
+    /// Why this setting needs the user's confirmation, if it does.  Kept
+    /// short enough for one line of the TUI menu.
     #[must_use]
-    pub fn cuts_power(self) -> bool {
-        matches!(self, Self::AcOutput(false) | Self::DcOutput(false))
+    pub fn warning(self) -> Option<&'static str> {
+        match self {
+            Self::AcOutput(false) | Self::DcOutput(false) => Some("cuts power to connected loads"),
+            // Jackery: "For emergency situations only ... not recommended
+            // for regular use."
+            Self::EmergencyCharge(true) => Some("for emergencies only, not regular use"),
+            _ => None,
+        }
     }
 
     /// Whether `status` shows this setting in effect.
@@ -74,7 +81,7 @@ impl Setting {
             Self::EnergySaving(timer) => status.energy_saving == Some(timer),
             Self::ChargeSpeed(speed) => status.charge_speed == Some(speed),
             Self::BatteryProtection(protection) => status.battery_protection == Some(protection),
-            Self::SuperCharge(on) => status.super_charge == Some(on),
+            Self::EmergencyCharge(on) => status.emergency_charge == Some(on),
             Self::Ups(on) => status.ups == Some(on),
         }
     }
@@ -99,7 +106,7 @@ impl Setting {
             Self::EnergySaving(timer) => (20, "pm", i64::from(timer.minutes())),
             Self::ChargeSpeed(speed) => (21, "cs", speed.wire()),
             Self::BatteryProtection(protection) => (22, "lps", protection.wire()),
-            Self::SuperCharge(on) => (23, "sfc", i64::from(on)),
+            Self::EmergencyCharge(on) => (23, "sfc", i64::from(on)),
             Self::Ups(on) => (24, "ups", i64::from(on)),
         }
     }
@@ -161,10 +168,12 @@ mod tests {
     }
 
     #[test]
-    fn only_turning_outputs_off_cuts_power() {
-        assert!(Setting::AcOutput(false).cuts_power());
-        assert!(Setting::DcOutput(false).cuts_power());
-        assert!(!Setting::AcOutput(true).cuts_power());
-        assert!(!Setting::Light(LightMode::Off).cuts_power());
+    fn risky_settings_carry_a_warning() {
+        assert!(Setting::AcOutput(false).warning().is_some());
+        assert!(Setting::DcOutput(false).warning().is_some());
+        assert!(Setting::EmergencyCharge(true).warning().is_some());
+        assert!(Setting::AcOutput(true).warning().is_none());
+        assert!(Setting::EmergencyCharge(false).warning().is_none());
+        assert!(Setting::Light(LightMode::Off).warning().is_none());
     }
 }

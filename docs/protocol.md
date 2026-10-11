@@ -23,7 +23,7 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `acov` | AC output voltage | /10 -> V |
 | `acohz` | AC output frequency | Hz |
 | `lm` | light mode | 0 off, 1 low, 2 high, 3 SOS |
-| `cs` | charge speed | 0 fast, 1 mute |
+| `cs` | AC charging mode | 0 fast, 1 quiet (under ~30 dB, slower), 2 custom |
 | `ups` | UPS mode | 0/1 |
 | `lps` | battery protection | 0 full, 1 eco |
 | `ec` | error code; app shows n as fault F(n-1) | 0 none |
@@ -35,7 +35,7 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `pm` | energy saving: outputs off at no/light load | min, 0 never |
 | `pmb` | energy saving active; app shows low-power icon when nonzero | |
 | `sltb` | screen setting | 1 off, 2 on 2 min, 3 on 2 h |
-| `sfc` | super charge (one-shot fast charge) | 0/1 |
+| `sfc` | emergency charging ("super charge" in code); clears itself after use | 0/1 |
 | `pal` | parallel/expansion battery; app shows merge icon at 2 | |
 | `ta` | temperature alarm | 0 none, 1 high, 2 low |
 
@@ -46,6 +46,18 @@ Keys from `ec` down were decoded from the app 2.4.2
 App option lists for model 12 (`rb/k.java`, "E2000Pro2"): `ast` 120,
 480, 720, 1440, never; `pm` 120, 480, 720, 1440, never. The test unit
 reported `ast=120`, `pm=720`, `sltb` 1 or 2, all others 0.
+
+App strings (`charge_setting_*`): fast is "Charge your device at full
+capacity"; quiet is "The noise during charging can be reduced to less
+than 30dB approximately, but the charging speed will be slower";
+emergency is "For emergency situations only - employs rapid wall
+charging to quickly power up the device. It is not recommended for
+regular use." The unit clears `sfc` after one use, when full, or when AC
+is unplugged. Custom mode charges at `csc` watts, chosen in 100 W steps
+between `csl` and `cst` (`SettingChargeActivity.java`,
+`PowerSettingSeekBar.java`); the app shows it only when `C()` is true,
+which it is not for model 12, and the test unit reports no `csl`, `cst`,
+or `csc`. The app also hides the charging mode while `sfc` is on.
 
 The app has a "Bluetooth/Wi-Fi auto-off" setting (key `tmt`, command 44,
 `SETTING_BLUETOOTH_MODULE_SLEEP_TIME`), but hides it for model 12
@@ -229,7 +241,8 @@ BLE message id -> meaning (cloud message name where one exists):
 - 6 read device info (`QueryDeviceProperty`)
 - output toggles: AC, DC, DC car, DC USB; AC 240; output priority
 - 17 light, 18 screen, 19 auto-shutdown, 20 energy saving
-- 21 charge, 22 battery, 23 super-charge, 24 UPS, 25 time zone
+- 21 charge, 22 battery, 23 emergency charge, 24 UPS, 25 time zone
+- 38 custom charge power (`csc`)
 - 26-30 charge/discharge plans (`*ElectricityStrategy`)
 - 42/43 TOU peaks/troughs (`TOUSchedule`, `QueryTOUSchedule`)
 - 45 reboot (`DeviceReboot`), 46 power off
@@ -251,9 +264,10 @@ key (`PortableControlFormat.java`, `lc/a.java`, `cmd/portable/b.java`):
 | 18 | `slt` | screen minutes 0, 2, 120; reported back as `sltb` 1, 2, 3 |
 | 19 | `ast` | auto-off minutes, 0 never |
 | 20 | `pm` | energy saving minutes, 0 never |
-| 21 | `cs` | charge speed |
+| 21 | `cs` | charging mode 0 fast, 1 quiet, 2 custom |
 | 22 | `lps` | battery protection |
-| 23 | `sfc` | super charge |
+| 23 | `sfc` | emergency charging |
+| 38 | `csc` | custom charge power, W |
 | 24 | `ups` | UPS mode |
 
 Live (2026-10-11): `{"lm":1}` on action 17 was acknowledged in about

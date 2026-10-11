@@ -75,11 +75,14 @@ impl From<i64> for LightMode {
     }
 }
 
-/// `cs`
+/// `cs`: the app's AC charging mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChargeSpeed {
     Fast,
-    Mute,
+    /// "Quiet Charging Mode": under about 30 dB, slower.
+    Quiet,
+    /// Charge at the power set by `csc`; the app hides this for model 12.
+    Custom,
     Unknown(i64),
 }
 
@@ -88,7 +91,8 @@ impl ChargeSpeed {
     pub(crate) fn wire(self) -> i64 {
         match self {
             Self::Fast => 0,
-            Self::Mute => 1,
+            Self::Quiet => 1,
+            Self::Custom => 2,
             Self::Unknown(value) => value,
         }
     }
@@ -98,7 +102,8 @@ impl From<i64> for ChargeSpeed {
     fn from(value: i64) -> Self {
         match value {
             0 => Self::Fast,
-            1 => Self::Mute,
+            1 => Self::Quiet,
+            2 => Self::Custom,
             other => Self::Unknown(other),
         }
     }
@@ -266,8 +271,9 @@ pub struct Status {
     /// `pm`: turn outputs off after this long at no or light load.
     pub energy_saving: Option<OffTimer>,
     pub screen: Option<ScreenMode>,
-    /// `sfc`: one-shot fast charge.
-    pub super_charge: Option<bool>,
+    /// `sfc`: the app's "Emergency Charging", for emergencies only; the
+    /// unit clears it after one charge.
+    pub emergency_charge: Option<bool>,
     pub temperature_alarm: Option<TemperatureAlarm>,
     /// Every field as received, including undocumented ones.
     pub raw: RawStatus,
@@ -303,7 +309,7 @@ impl TryFrom<RawStatus> for Status {
             auto_off: integer::<u32>(&raw, "ast")?.map(OffTimer::from),
             energy_saving: integer::<u32>(&raw, "pm")?.map(OffTimer::from),
             screen: integer::<i64>(&raw, "sltb")?.map(ScreenMode::from),
-            super_charge: flag(&raw, "sfc")?,
+            emergency_charge: flag(&raw, "sfc")?,
             temperature_alarm: integer::<i64>(&raw, "ta")?.map(TemperatureAlarm::from),
             raw,
         })
@@ -346,6 +352,7 @@ mod tests {
     use serde_json::json;
 
     use super::BatteryState;
+    use super::ChargeSpeed;
     use super::LightMode;
     use super::OffTimer;
     use super::ScreenMode;
@@ -393,7 +400,7 @@ mod tests {
         assert_eq!(status.auto_off, Some(OffTimer::Minutes(120)));
         assert_eq!(status.energy_saving, Some(OffTimer::Minutes(720)));
         assert_eq!(status.screen, Some(ScreenMode::Off));
-        assert_eq!(status.super_charge, Some(false));
+        assert_eq!(status.emergency_charge, Some(false));
         assert_eq!(status.temperature_alarm, Some(TemperatureAlarm::None));
         assert_eq!(status.solar_input_watts, Some(0.0));
     }
@@ -414,6 +421,8 @@ mod tests {
         let status = parse(json!({"bs": 7, "lm": 9})).expect("valid status");
         assert_eq!(status.battery_state, Some(BatteryState::Unknown(7)));
         assert_eq!(status.light_mode, Some(LightMode::Unknown(9)));
+        let status = parse(json!({"cs": 2})).expect("valid status");
+        assert_eq!(status.charge_speed, Some(ChargeSpeed::Custom));
     }
 
     #[test]

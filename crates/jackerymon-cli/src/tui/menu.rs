@@ -64,7 +64,7 @@ pub(super) fn controls() -> Vec<Control> {
         },
         Control {
             label: "Charge speed",
-            choices: [ChargeSpeed::Fast, ChargeSpeed::Mute]
+            choices: [ChargeSpeed::Fast, ChargeSpeed::Quiet]
                 .map(Setting::ChargeSpeed)
                 .to_vec(),
         },
@@ -75,8 +75,8 @@ pub(super) fn controls() -> Vec<Control> {
                 .to_vec(),
         },
         Control {
-            label: "Super charge",
-            choices: switch(Setting::SuperCharge),
+            label: "Emergency charge",
+            choices: switch(Setting::EmergencyCharge),
         },
         Control {
             label: "UPS",
@@ -98,7 +98,7 @@ pub(super) enum Menu {
         row: usize,
         choice: usize,
     },
-    /// Asking before a setting that cuts power.
+    /// Asking before a setting with a warning.
     Confirm {
         row: usize,
         choice: usize,
@@ -156,7 +156,7 @@ impl Menu {
             }
             (Self::Choices { row, choice }, KeyCode::Enter) => {
                 let setting = controls[row].choices[choice];
-                if setting.cuts_power() {
+                if setting.warning().is_some() {
                     (Self::Confirm { row, choice }, None)
                 } else {
                     (Self::Closed, Some(setting))

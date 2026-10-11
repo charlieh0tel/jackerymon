@@ -31,7 +31,8 @@ const MINUTES_PER_HOUR: u32 = 60;
 pub(crate) struct SetArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
-    /// Allow turning an output off, which cuts power to its loads.
+    /// Confirm a risky setting: turning an output off, which cuts power to
+    /// its loads, or turning emergency charging on.
     #[arg(long)]
     yes: bool,
     #[command(subcommand)]
@@ -74,7 +75,7 @@ enum SettingArgs {
         mode: Protection,
     },
     /// One-shot fast charge; the unit clears it after use.
-    SuperCharge {
+    EmergencyCharge {
         state: Switch,
     },
     Ups {
@@ -108,7 +109,7 @@ enum Screen {
 #[derive(Clone, Copy, ValueEnum)]
 enum Speed {
     Fast,
-    Mute,
+    Quiet,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -161,13 +162,13 @@ impl From<SettingArgs> for Setting {
             SettingArgs::EnergySaving { after } => Self::EnergySaving(after),
             SettingArgs::ChargeSpeed { speed } => Self::ChargeSpeed(match speed {
                 Speed::Fast => ChargeSpeed::Fast,
-                Speed::Mute => ChargeSpeed::Mute,
+                Speed::Quiet => ChargeSpeed::Quiet,
             }),
             SettingArgs::BatteryProtection { mode } => Self::BatteryProtection(match mode {
                 Protection::Full => BatteryProtection::Full,
                 Protection::Eco => BatteryProtection::Eco,
             }),
-            SettingArgs::SuperCharge { state } => Self::SuperCharge(state.on()),
+            SettingArgs::EmergencyCharge { state } => Self::EmergencyCharge(state.on()),
             SettingArgs::Ups { state } => Self::Ups(state.on()),
         }
     }
@@ -175,8 +176,10 @@ impl From<SettingArgs> for Setting {
 
 pub(crate) async fn run(arguments: SetArgs) -> Result<()> {
     let setting = Setting::from(arguments.setting);
-    if setting.cuts_power() && !arguments.yes {
-        bail!("{setting} cuts power to connected loads; pass --yes to confirm");
+    if let Some(warning) = setting.warning()
+        && !arguments.yes
+    {
+        bail!("{setting}: {warning}; pass --yes to confirm");
     }
     let key_file = arguments.connection.key_file()?;
     let config = arguments.connection.poll_config(Some(MAX_FAILURES));

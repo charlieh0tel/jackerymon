@@ -96,13 +96,17 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
   porting it buys nothing yet.
 
 - **Control v1 scope.** AC/DC outputs, light, screen, auto-off and
-  energy-saving timers, charge speed, battery protection, super charge,
+  energy-saving timers, charge speed, battery protection, emergency charge,
   and UPS mode. Only these decoded commands can be sent; reboot and power
   off cannot. A command counts as applied only after a status read shows
   the new value, not on the echo alone. Commands share the poller's
   connection and never overlap a status query.
-- **Confirmation before cutting power.** The TUI asks y/n before turning
-  an output off; `jackerymon set` requires `--yes` for that.
+- **Confirmation before risky settings.** Turning an output off cuts
+  power to its loads; emergency charging is, per Jackery, for emergencies
+  only. The TUI asks y/n before either; `jackerymon set` requires `--yes`.
+- **No custom charge power.** Action 38 (`csc`, watts in 100 W steps,
+  bounded by `csl`/`cst`) is decoded, but the app hides custom charging
+  for model 12 and the unit reports none of those keys.
 - **TUI control is a settings menu.** One key opens a menu of every
   control; arrows and Enter choose.
 - **Key bootstrap path unrecorded.** The 2026-10-04 key came from either

@@ -53,7 +53,7 @@ const INPUT_COLOR: Color = Color::Green;
 const OUTPUT_COLOR: Color = Color::Yellow;
 const ALERT_COLOR: Color = Color::Red;
 const MISSING: &str = "—";
-const MENU_WIDTH: u16 = 40;
+const MENU_WIDTH: u16 = 44;
 /// Borders above and below the menu rows.
 const MENU_BORDER_HEIGHT: u16 = 2;
 const MENU_VALUE_WIDTH: usize = 20;
@@ -127,7 +127,13 @@ fn draw_menu(frame: &mut Frame, menu: Menu, controls: &[Control], status: Option
                     controls[row].label,
                     setting_value_text(controls[row].choices[choice])
                 )),
-                Line::from("This cuts power to its loads.").fg(ALERT_COLOR),
+                Line::from(
+                    controls[row].choices[choice]
+                        .warning()
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+                .fg(ALERT_COLOR),
                 Line::from("y yes   n no"),
             ],
         ),
@@ -155,14 +161,15 @@ fn setting_value_text(setting: Setting) -> String {
     match setting {
         Setting::AcOutput(on)
         | Setting::DcOutput(on)
-        | Setting::SuperCharge(on)
+        | Setting::EmergencyCharge(on)
         | Setting::Ups(on) => on_off(on),
         Setting::Light(mode) => light_text(mode),
         Setting::Screen(mode) => screen_text(mode),
         Setting::AutoOff(timer) | Setting::EnergySaving(timer) => timer_text(timer),
         Setting::ChargeSpeed(speed) => match speed {
             ChargeSpeed::Fast => "fast".to_owned(),
-            ChargeSpeed::Mute => "mute".to_owned(),
+            ChargeSpeed::Quiet => "quiet".to_owned(),
+            ChargeSpeed::Custom => "custom".to_owned(),
             ChargeSpeed::Unknown(value) => format!("unknown ({value})"),
         },
         Setting::BatteryProtection(protection) => match protection {

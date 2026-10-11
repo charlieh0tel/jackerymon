@@ -95,7 +95,7 @@ before supplying it to RC4. Model code 12 selects this codec, with no IV.
 Command set (BLE message id -> meaning, with the matching cloud message
 name where one exists): 6 = read device info (`QueryDeviceProperty`),
 plus output toggles (AC, DC, DC car, DC USB), light, screen, charge /
-battery / super-charge / UPS settings, time zone, charge/discharge and
+battery / emergency-charge (super-charge) / UPS settings, time zone, charge/discharge and
 TOU schedules, reboot (`DeviceReboot`), power off, Wi-Fi read/write, and
 MQTT-connect sync.  Device property keys match the cloud set (`rb`
 battery %, `ip`/`op` in/out W, `bt` temp x10, `acov` AC volts x10,
