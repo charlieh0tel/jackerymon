@@ -99,8 +99,12 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
   energy-saving timers, charge speed, battery protection, emergency charge,
   and UPS mode. Only these decoded commands can be sent; reboot and power
   off cannot. A command counts as applied only after a status read shows
-  the new value, not on the echo alone. Commands share the poller's
-  connection and never overlap a status query.
+  the new value, not on the echo alone (the acknowledgment carries the
+  resulting state, and the firmware acknowledges some settings it then
+  ignores). If the link drops mid-change, the first status after
+  reconnecting decides; giving up answers it as a transport failure.
+  Commands share the poller's connection and never overlap a status
+  query.
 - **Confirmation before risky settings.** Turning an output off cuts
   power to its loads; emergency charging is, per Jackery, for emergencies
   only. The TUI asks y/n before either; `jackerymon set` requires `--yes`.
@@ -125,8 +129,6 @@ status, and `jackerymon set` and the TUI settings menu change settings. Key boot
 3. Reset/unbinding effect on the key remains unknown.
 4. Daemon: poll, log JSON lines, serve `/metrics` and HTTP JSON; point
    the TUI at it.
-5. After a transport failure while applying a setting, report the next
-   status rather than only the failure.
 
 ## Housekeeping
 

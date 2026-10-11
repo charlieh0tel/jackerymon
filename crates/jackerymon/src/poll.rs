@@ -6,6 +6,8 @@
 //!
 //! Setting changes arrive on a channel and run between queries, never
 //! during one.  Each counts as applied only once a status read shows it.
+//! If the link drops first, the change may still have taken effect, so
+//! the first status after reconnecting decides.
 
 use std::future::Future;
 use std::future::pending;
@@ -130,13 +132,48 @@ struct Counters {
 }
 
 /// Polls until `on_event` breaks, `stop` completes, or polling fails.
-/// Every exit closes the open connection.
+/// Every exit closes the open connection and answers any setting still
+/// awaiting confirmation.
 pub(crate) async fn poll_with<C: Connector>(
-    mut connector: C,
+    connector: C,
     config: PollConfig,
     mut commands: Commands,
     stop: impl Future<Output = ()>,
     mut on_event: impl FnMut(PollEvent) -> ControlFlow<()>,
+) -> Result<(), PollError> {
+    let mut unverified = None;
+    let result = poll_loop(
+        connector,
+        config,
+        &mut commands,
+        stop,
+        &mut on_event,
+        &mut unverified,
+    )
+    .await;
+    if let Some(request) = unverified {
+        let error = result
+            .as_ref()
+            .err()
+            .map_or_else(|| "polling stopped".to_owned(), ToString::to_string);
+        answer(
+            request.reply,
+            Err(ControlError::Transport {
+                setting: request.setting,
+                error,
+            }),
+        );
+    }
+    result
+}
+
+async fn poll_loop<C: Connector>(
+    mut connector: C,
+    config: PollConfig,
+    commands: &mut Commands,
+    stop: impl Future<Output = ()>,
+    on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
+    unverified: &mut Option<ControlRequest>,
 ) -> Result<(), PollError> {
     let mut stop = pin!(stop);
     let mut counters = Counters::default();
@@ -156,7 +193,7 @@ pub(crate) async fn poll_with<C: Connector>(
                     ControlFlow::Continue(()) => {
                         tokio::select! {
                             () = &mut stop => Ok(ControlFlow::Break(())),
-                            outcome = serve(&mut link, config, &mut commands, &mut counters, &mut on_event) => outcome,
+                            outcome = serve(&mut link, config, commands, &mut counters, on_event, unverified) => outcome,
                         }
                     }
                 };
@@ -203,10 +240,20 @@ async fn serve<L: Link>(
     commands: &mut Commands,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
+    unverified: &mut Option<ControlRequest>,
 ) -> Result<ControlFlow<()>, BleError> {
     loop {
         let started = Instant::now();
         let status = link.exchange(&Request::status(), config.timeout).await?;
+        if let Some(request) = unverified.take() {
+            let setting = request.setting;
+            let result = if applied(setting, &status) {
+                Ok(())
+            } else {
+                Err(ControlError::NotApplied(setting))
+            };
+            answer(request.reply, result);
+        }
         if record(status, started, counters, on_event).is_break() {
             return Ok(ControlFlow::Break(()));
         }
@@ -218,7 +265,7 @@ async fn serve<L: Link>(
                     break;
                 }
                 Some(request) = next_command(commands) => {
-                    if apply(link, config, request, counters, on_event).await?.is_break() {
+                    if apply(link, config, request, counters, on_event, unverified).await?.is_break() {
                         return Ok(ControlFlow::Break(()));
                     }
                 }
@@ -254,20 +301,18 @@ fn record(
 }
 
 /// Sends one setting, then reads status until it shows the change.  A
-/// device rejection is answered and polling goes on; a transport failure
-/// is answered and returned so the link reconnects.
+/// device rejection is answered and polling goes on.  A transport failure
+/// leaves the request in `unverified` for the next status to settle and
+/// is returned so the link reconnects.
 async fn apply<L: Link>(
     link: &mut L,
     config: PollConfig,
     request: ControlRequest,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
+    unverified: &mut Option<ControlRequest>,
 ) -> Result<ControlFlow<()>, BleError> {
     let setting = request.setting;
-    let answer = |reply: oneshot::Sender<_>, result| {
-        // The requester may have given up; polling goes on regardless.
-        reply.send(result).ok();
-    };
     match link.exchange(&setting.request(), config.timeout).await {
         Ok(_echo) => {}
         Err(BleError::Decode(DecodeError::Device { code, .. })) => {
@@ -275,7 +320,7 @@ async fn apply<L: Link>(
             return Ok(ControlFlow::Continue(()));
         }
         Err(error) => {
-            answer(request.reply, Err(transport(setting, &error)));
+            *unverified = Some(request);
             return Err(error);
         }
     }
@@ -284,11 +329,11 @@ async fn apply<L: Link>(
         let status = match link.exchange(&Request::status(), config.timeout).await {
             Ok(status) => status,
             Err(error) => {
-                answer(request.reply, Err(transport(setting, &error)));
+                *unverified = Some(request);
                 return Err(error);
             }
         };
-        let applied = Status::try_from(status.clone()).is_ok_and(|status| setting.applied(&status));
+        let applied = applied(setting, &status);
         let flow = record(status, started, counters, on_event);
         if applied {
             answer(request.reply, Ok(()));
@@ -303,11 +348,13 @@ async fn apply<L: Link>(
     unreachable!("the last attempt answers")
 }
 
-fn transport(setting: Setting, error: &BleError) -> ControlError {
-    ControlError::Transport {
-        setting,
-        error: error.to_string(),
-    }
+fn applied(setting: Setting, status: &RawStatus) -> bool {
+    Status::try_from(status.clone()).is_ok_and(|status| setting.applied(&status))
+}
+
+fn answer(reply: oneshot::Sender<Result<(), ControlError>>, result: Result<(), ControlError>) {
+    // The requester may have given up; polling goes on regardless.
+    reply.send(result).ok();
 }
 
 #[cfg(test)]
@@ -659,15 +706,44 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn transport_failure_is_answered_and_reconnects() {
+    async fn status_after_reconnect_settles_an_interrupted_setting() {
         let (reply, actions, result) = control(
-            vec![Step::Status(100), Step::QueryFails, Step::Status(99)],
+            vec![Step::Status(100), Step::QueryFails, Step::Light(1)],
+            LIGHT,
+            2,
+        )
+        .await;
+        assert_eq!(reply, Ok(()));
+        assert_eq!(actions, [6, 17, 6]);
+        assert!(result.is_ok());
+        let (reply, _, _) = control(
+            vec![
+                Step::Status(100),
+                Step::Ack,
+                Step::QueryFails,
+                Step::Light(0),
+            ],
+            LIGHT,
+            2,
+        )
+        .await;
+        assert_eq!(reply, Err(ControlError::NotApplied(LIGHT)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn giving_up_answers_an_interrupted_setting() {
+        let (reply, _, result) = control(
+            vec![
+                Step::Status(100),
+                Step::QueryFails,
+                Step::ConnectFails,
+                Step::ConnectFails,
+            ],
             LIGHT,
             2,
         )
         .await;
         assert!(matches!(reply, Err(ControlError::Transport { .. })));
-        assert_eq!(actions, [6, 17, 6]);
-        assert!(result.is_ok());
+        assert!(matches!(result, Err(PollError::TooManyFailures { .. })));
     }
 }
