@@ -10,6 +10,7 @@ use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
 use jackerymon::ble;
+use jackerymon::control::OFF_TIMER_CHOICES;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
 use jackerymon::status::BatteryProtection;
@@ -56,11 +57,15 @@ enum SettingArgs {
     },
     /// Power off after this long under light load on battery.
     AutoOff {
-        after: Timer,
+        /// never, 2h, 8h, 12h, or 24h.
+        #[arg(value_parser = parse_timer)]
+        after: OffTimer,
     },
     /// Turn outputs off after this long at no or light load.
     EnergySaving {
-        after: Timer,
+        /// never, 2h, 8h, 12h, or 24h.
+        #[arg(value_parser = parse_timer)]
+        after: OffTimer,
     },
     ChargeSpeed {
         speed: Speed,
@@ -100,20 +105,6 @@ enum Screen {
     TwoHours,
 }
 
-/// The app's choices for model 12.
-#[derive(Clone, Copy, ValueEnum)]
-enum Timer {
-    Never,
-    #[value(name = "2h")]
-    TwoHours,
-    #[value(name = "8h")]
-    EightHours,
-    #[value(name = "12h")]
-    TwelveHours,
-    #[value(name = "24h")]
-    TwentyFourHours,
-}
-
 #[derive(Clone, Copy, ValueEnum)]
 enum Speed {
     Fast,
@@ -132,16 +123,21 @@ impl Switch {
     }
 }
 
-impl Timer {
-    fn off_timer(self) -> OffTimer {
-        let hours = match self {
-            Self::Never => return OffTimer::Never,
-            Self::TwoHours => 2,
-            Self::EightHours => 8,
-            Self::TwelveHours => 12,
-            Self::TwentyFourHours => 24,
-        };
-        OffTimer::Minutes(hours * MINUTES_PER_HOUR)
+/// One of [`OFF_TIMER_CHOICES`], written `never` or as hours (`2h`).
+fn parse_timer(text: &str) -> Result<OffTimer, String> {
+    OFF_TIMER_CHOICES
+        .into_iter()
+        .find(|timer| timer_name(*timer) == text)
+        .ok_or_else(|| {
+            let names: Vec<String> = OFF_TIMER_CHOICES.into_iter().map(timer_name).collect();
+            format!("expected one of {}", names.join(", "))
+        })
+}
+
+fn timer_name(timer: OffTimer) -> String {
+    match timer {
+        OffTimer::Never => "never".to_owned(),
+        OffTimer::Minutes(minutes) => format!("{}h", minutes / MINUTES_PER_HOUR),
     }
 }
 
@@ -161,8 +157,8 @@ impl From<SettingArgs> for Setting {
                 Screen::TwoMinutes => ScreenMode::Brief,
                 Screen::TwoHours => ScreenMode::Steady,
             }),
-            SettingArgs::AutoOff { after } => Self::AutoOff(after.off_timer()),
-            SettingArgs::EnergySaving { after } => Self::EnergySaving(after.off_timer()),
+            SettingArgs::AutoOff { after } => Self::AutoOff(after),
+            SettingArgs::EnergySaving { after } => Self::EnergySaving(after),
             SettingArgs::ChargeSpeed { speed } => Self::ChargeSpeed(match speed {
                 Speed::Fast => ChargeSpeed::Fast,
                 Speed::Mute => ChargeSpeed::Mute,

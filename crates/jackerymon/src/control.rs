@@ -19,6 +19,16 @@ use crate::status::Status;
 
 /// Message type of every setting change.
 const PROPERTY_CHANGE: MessageType = MessageType(4);
+const MINUTES_PER_HOUR: u32 = 60;
+
+/// Auto-off and energy-saving choices the app offers for model 12.
+pub const OFF_TIMER_CHOICES: [OffTimer; 5] = [
+    OffTimer::Never,
+    OffTimer::Minutes(2 * MINUTES_PER_HOUR),
+    OffTimer::Minutes(8 * MINUTES_PER_HOUR),
+    OffTimer::Minutes(12 * MINUTES_PER_HOUR),
+    OffTimer::Minutes(24 * MINUTES_PER_HOUR),
+];
 
 /// One setting change.  `Unknown(n)` values are sent as `n`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
