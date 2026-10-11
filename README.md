@@ -3,6 +3,23 @@
 Direct BLE monitoring for Jackery power stations; see [PLAN.md](PLAN.md)
 and [FINDINGS.md](FINDINGS.md).
 
+## Getting your key
+
+Talking to the unit needs its per-device BLE key, which only Jackery's
+cloud hands out. Getting it is a one-time step done with the Python PoC
+(details below and in `docs/protocol.md`):
+
+1. Wake the unit and check it is visible:
+   `uv run tools/jackery_key.py --scan-only`.
+2. Fetch the key with your Jackery account (email and password are
+   prompted): `uv run tools/jackery_key.py --address <unit address>`.
+3. If the unit is not bound to your account, add `--bind`. This binds it
+   to the account and takes the key from the bind response.
+
+This writes `jackery-key.json` (mode 0600). Everything after that,
+Python or Rust, uses only BLE. The test unit's key was obtained this
+way; which of steps 2 and 3 produced it was not recorded.
+
 ## Rust
 
 `crates/jackerymon` is the library: advertisement decoding, the
