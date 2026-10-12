@@ -254,7 +254,6 @@ mod tests {
 
     #[test]
     fn risky_settings_carry_a_warning() {
-        // The user decided outputs need no confirmation.
         assert!(Setting::AcOutput(false).warning().is_none());
         assert!(Setting::DcOutput(false).warning().is_none());
         assert!(Setting::EmergencyCharge(true).warning().is_some());

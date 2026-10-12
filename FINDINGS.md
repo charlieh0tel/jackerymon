@@ -110,6 +110,8 @@ entry `user_cache_id_bind_devices` (`ce/d.java`, `ce/h.java`). Successful
 Explorer unbinding removes the device and rewrites that cache
 (`PortableSettingActivity.java`). The user's phone is unrooted and the
 unit was unbound before bootstrap; cache extraction was not needed.
+Which path produced the 2026-10-04 key, `device/bluetoothKey` lookup or
+`--bind`, was not recorded and the user does not remember.
 
 The Python PoC in `tools/jackery_key.py` uses Bleak to decode advertisements,
 then reproduces login and either key lookup or explicit Explorer binding.
@@ -322,6 +324,14 @@ found" episodes may have been this; the ones where the user saw the
 icons off were not. Fix: when the saved address is present without the
 identity, remove the object (BlueZ `RemoveDevice`, no privilege
 needed) and scan again. btleplug cannot; `bluer` can (see `PLAN.md`).
+
+After the move to `bluer` (2026-10-12), `jackerymon poll --count 12`
+returned 12 samples on one connection with no failures, about 218 ms
+per query, both from a connection a killed process left open and from
+a fresh scan. bluetoothd logged no registration errors and the device
+object count stayed at 6, since the scan's address pattern keeps other
+devices out. Connecting right after a connection drops can still take
+several attempts (`le-connection-abort-by-local`).
 
 Restarting bluetoothd made bluez-async 0.9.0, under btleplug, panic in
 a worker thread (`messagestream.rs:40`, unwrap on "No match with that

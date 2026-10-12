@@ -1,204 +1,114 @@
 # Plan
 
 Records why things are the way they are.  Read before proposing
-architectural changes; update when a decision changes.
+architectural changes; update when a decision changes.  Observations
+and measurements belong in [FINDINGS.md](FINDINGS.md), not here.
 
 ## Goal
 
-A Rust workspace for monitoring Jackery units over BLE:
-a library, a logging daemon, a TUI, and a Prometheus exporter.
-Prove the Explorer protocol with a small Python PoC, then port it to Rust.
-
-## Current state (2026-10-10): BLE status works; key survives power-cycle
-
-The Python PoC reads status directly from the Explorer 2000 over BLE
-using a user-acquired key. See [FINDINGS.md](FINDINGS.md) for the evidence.
-Summary:
-
-- **BLE** status has been validated with a per-device key that
-  is fetched from Jackery's cloud and cached by the Android app.
-  `tools/jackery_key.py` reproduces advertisement decoding and cloud key
-  acquisition, plus a validated model-12 GATT status query. The user
-  completed login and supplied the resulting local key file.
-  Wi-Fi credentials were removed before testing began. Three repeat
-  reads succeeded using the same saved key with no reconnect retries.
-  Persistent polling then produced 12 samples over one connection in
-  62.4 seconds, with zero transport failures.
-  A five-minute run with USB, AC, and light enabled produced 60 samples
-  on one connection, zero failures, and 216.2 ms median query latency.
-
-After a 2026-10-05 power-cycle the unit stopped advertising for days
-(no Jackery advertisement at the HCI layer); by 2026-10-10 it was back,
-cause unknown. The saved key then still worked: it survives power-cycle.
-
-The Rust library `crates/jackerymon` ports the codec, advertisement
-decoding, key-file loading, typed status, BLE transport (btleplug, now
-`bluer`), and the poller from the PoC, with offline tests. `jackerymon
-poll` matched the PoC's live results on its first run, and `jackerymon
-tui` shows live status, `jackerymon set` and the TUI settings menu
-change settings, and `jackerymon daemon` serves status, metrics, and
-settings over HTTP. Key bootstrap stays in Python.
+A Rust workspace for monitoring Jackery units over BLE: a library, a
+logging daemon, a TUI, and a Prometheus exporter.  The Explorer protocol
+was proven with a small Python PoC (`tools/jackery_key.py`), then ported.
 
 ## Decisions
 
-- **Direct monitoring, cloud bootstrap PoC.** The user authorized a Python
-  PoC reproducing the app's cloud key retrieval. This is an exception to
-  the earlier no-cloud research scope. Monitoring should still use BLE
-  directly. Status queries succeeded without client cloud requests and
-  with Wi-Fi credentials already absent before testing. Short persistent
-  polling is validated and the key survives power-cycle; long-duration
-  reliability, key lifetime, and reset/unbinding remain to be tested.
-- **Python tooling uses uv.** Inline script dependencies keep the PoC and tests
-  runnable without a manually managed virtual environment.
-- **BLE request state belongs to a session.** `StatusSession` separates
-  notification/disconnect handling and per-query decoder state from the
-  connection setup. Polling reuses the connection/subscription and permits
-  only one query at a time, with fresh decoder state for each query.
-- **Polling is sequential and observable.** Default delay is five seconds
-  after each response. JSON lines include timestamps, query latency,
-  connection count, and transport failure count. A successful sample resets
-  the three-failure reconnect budget; invalid protocol data fails immediately.
-  Timeout recovery closes the connection to discard late responses.
-- **Bounded BLE reconnects.** The unit sometimes disconnects during service
-  discovery or before status arrives. The read-only query retries transport
-  failures three times with fresh discovery and decoder state. Protocol/key
-  errors fail immediately. Notification cleanup is left to disconnect.
-- **BLE is the monitoring transport.** Focus development on the working
-  Explorer BLE protocol. Design the Rust library around the validated
-  session behavior; a generic multi-transport abstraction is not needed.
-- **BLE library: btleplug (superseded by `bluer`).** Chosen by the user
-  over `bluer`. It covers everything the PoC does (scan with
-  manufacturer data, connect, notify, write). Costs: generic errors hide
-  BlueZ disconnect reasons (use `btmon`/journal instead), no passive
-  advertisement monitoring, no adapter control. Keep BLE in one small
-  module so a switch to `bluer` stays cheap if disconnect diagnosis
-  needs it.
-- **Switching to `bluer` (2026-10-12).** Decided by the user. The unit's
-  empty random-type advertisement can take over its BlueZ object and
-  hide it (`FINDINGS.md`, Duplicate advertisement); recovery needs
-  `RemoveDevice`, which btleplug lacks and `bluer` has. `bluer` also
-  avoids the bluez-async panic on a bluetoothd restart. Done behind the
-  existing connector/link traits. Each connect first reuses a
-  connection left open by a process that exited without disconnecting
-  (a connected unit does not advertise), then removes a random-type
-  object holding the unit's address, then scans LE only with a discovery
-  pattern of the unit's address, so BlueZ makes no objects for other
-  devices. A match must have an RSSI, meaning it was heard during this
-  scan. Live check (2026-10-12): 12 samples on one connection both from
-  a leftover connection and from a fresh scan, no failures, about 218 ms
-  per query; bluetoothd logged no registration errors and the device
-  object count stayed at 6.
-- **Library logging through `log`.** The library reports recoveries it
-  makes on its own (reusing a leftover connection, removing the stale
-  object) with `log::info!`; the CLI installs `env_logger` on stderr,
-  except for `tui`, whose screen stderr would corrupt.
-- **Property model follows the BLE wire keys.** `Status` types the
-  documented keys and keeps every field in `raw`. Absent keys are `None`;
-  wrong types fail; unknown enum values are kept as `Unknown`. Do not
-  invent battery-current or battery-power measurements from input/output
-  totals.
-- **TUI first, daemon later.** The unit accepts one BLE connection, so
-  eventually one daemon owns it: it polls, logs JSON lines, serves
-  Prometheus `/metrics`, and serves HTTP JSON to the TUI.  To start,
-  the TUI connects directly. It consumes a stream of samples, not BLE,
-  so the daemon can replace the source without TUI changes. The TUI does
-  not log. While it runs, the phone app cannot connect.
-- **One program, subcommands.** `crates/jackerymon` is the library
+### Scope and transport
+
+- **BLE is the monitoring transport.**  IP and MQTT were ruled out for
+  the Explorer (`FINDINGS.md`).  The library is built around the
+  validated BLE session; no multi-transport abstraction.
+- **Cloud only for the key.**  The user authorized reproducing the app's
+  cloud key retrieval as a one-time bootstrap.  Monitoring and control
+  never touch the cloud.
+- **Key bootstrap stays in Python.**  A one-time step; porting it buys
+  nothing.  Python tooling uses uv inline script dependencies.
+- **BLE library: `bluer`.**  btleplug came first, but the unit's empty
+  random-type advertisement can take over its BlueZ object and hide it
+  (`FINDINGS.md`, Duplicate advertisement).  Recovery needs BlueZ
+  `RemoveDevice`, which `bluer` has and btleplug lacks; `bluer` also
+  avoids a bluez-async panic when bluetoothd restarts.  Linux only.
+- **How a connect finds the unit.**  Reuse a connection a dead process
+  left open (a connected unit does not advertise); remove a random-type
+  object holding the unit's address; scan LE only with a discovery
+  pattern of that address, so BlueZ makes no objects for other devices;
+  accept only a unit with an RSSI, meaning heard during this scan.
+- **Library logging through `log`.**  The library reports recoveries it
+  makes on its own, such as reusing a connection or removing the stale
+  object.  The CLI logs to stderr with `env_logger`, except in `tui`,
+  whose screen stderr would corrupt.
+
+### Library
+
+- **Property model follows the BLE wire keys.**  `Status` types the
+  documented keys and keeps every field in `raw`.  Absent keys are
+  `None`; wrong types fail; unknown enum values are kept as `Unknown`.
+  Battery current or power is never derived from input/output totals.
+- **Polling lives in the library.**  It is generic over a small
+  connector/link pair so its retry policy is tested offline.  Events go
+  to a callback that can stop polling; a stop future also closes the
+  connection.  Five seconds between a response and the next request.
+  A sample resets the failure count; invalid protocol data is fatal; a
+  timeout closes the connection to discard late responses.  The failure
+  limit is optional: `poll` defaults to three, monitors retry forever.
+- **A setting counts as applied only when a status read shows it.**  The
+  acknowledgment carries the resulting state, and the firmware
+  acknowledges some settings it then ignores.  If the link drops
+  mid-change, the first status after reconnecting decides.  Settings
+  share the poller's connection and never overlap a status query.  A
+  request whose requester has gone is not sent.
+- **Control scope.**  AC/DC outputs, light, screen, auto-off and
+  energy-saving timers, charge speed, battery protection, emergency
+  charge, and UPS mode.  Reboot and power-off cannot be sent.  No custom
+  charge power: model 12 acknowledges it without applying it.
+- **Confirmation only for turning emergency charging on.**  Jackery
+  reserves it for emergencies.  Outputs need no confirmation.
+
+### Programs
+
+- **One program, subcommands.**  `crates/jackerymon` is the library
   (typed errors, no `anyhow`); `crates/jackerymon-cli` builds the single
-  `jackerymon` binary: `poll` now, `tui` and `daemon` later. One install
-  artifact sharing key-file and BLE options; the daemon binary carries
-  TUI code, which is acceptable. Monitoring only; control commands later.
-- **Polling lives in the library.** `poll` is generic over a small
-  connector/link pair so its retry policy is tested offline; `bluer`
-  implements it. Events go to a callback that can stop polling; a stop
-  future (Ctrl-C) also closes the connection. The failure limit is
-  optional: `poll` defaults to three like the PoC, a monitor retries
-  forever.
-- **Key bootstrap stays in Python.** The cloud login is a one-time step;
-  porting it buys nothing yet.
-
-- **Control v1 scope.** AC/DC outputs, light, screen, auto-off and
-  energy-saving timers, charge speed, battery protection, emergency charge,
-  and UPS mode. Only these decoded commands can be sent; reboot and power
-  off cannot. A command counts as applied only after a status read shows
-  the new value, not on the echo alone (the acknowledgment carries the
-  resulting state, and the firmware acknowledges some settings it then
-  ignores). If the link drops mid-change, the first status after
-  reconnecting decides; giving up answers it as a transport failure.
-  Commands share the poller's connection and never overlap a status
-  query.
-- **Confirmation only for emergency charging.** Jackery reserves it for
-  emergencies, so the TUI asks y/n and `jackerymon set` requires `--yes`
-  before turning it on. Outputs on or off need no confirmation (user
-  decision, 2026-10-11, reversing the earlier y/n for cutting power).
-- **No custom charge power.** Action 38 (`csc`, watts in 100 W steps,
-  bounded by `csl`/`cst`) is decoded, but the app hides custom charging
-  for model 12, the unit reports none of those keys, and a live test
-  showed the firmware acknowledging `cs=2` and `csc` without applying
-  them.
-- **TUI control is a settings menu.** `m` opens one list of every
-  control; ←/→ cycles the selected value and Enter applies it, keeping the
-  menu open. No second pop-up: the user found the two-level menu clumsy.
-- **Key bootstrap path unrecorded.** The 2026-10-04 key came from either
-  `device/bluetoothKey` or `--bind`; the user does not remember which.
-
-- **Daemon design.** `jackerymon daemon` owns the BLE connection and
-  retries forever. HTTP on `127.0.0.1:9888` by default: `GET /metrics`
-  (Prometheus text), `GET /status` (latest sample and link state, JSON),
-  `GET /events` (server-sent events of samples and link changes),
-  `POST /settings` (apply one setting; answers after status confirms).
-  Optional `--log-dir` writes daily `YYYY-MM-DD.jsonl` files in the
-  `poll` line format; pruning is left to logrotate or tmpfiles.
-  `jackerymon tui --daemon URL` reads `/events` and posts settings;
-  without it the TUI still connects directly. axum serves HTTP.
-- **Daemon risks accepted.** The control endpoint has no authentication,
-  so the default bind is localhost and the docs warn before exposing it.
-  Readings older than 60 s are not exported, so Prometheus never shows
-  stale values as live; `jackery_connected` and the last sample time are.
-  The daemon holds the unit's only connection, locking out the phone app.
-- **Daemon lifecycle (Codex review, 2026-10-11).** Polling ending, by
-  signal or fatal error, stops HTTP too: `/events` streams close and the
-  daemon exits with the polling result, so systemd sees failures. A
-  setting's 60 s deadline covers queueing, so a full queue cannot hold a
-  request indefinitely. The TUI ages each sample by its own timestamp,
-  so an old sample replayed by the daemon does not look fresh.
-- **Daemon adversarial review (2026-10-11).** Decided with the user:
-  - Settings stay open to anyone who can reach the daemon: no peer or
-    token check, and no `Host` check. Accepted risk: DNS rebinding lets
-    a web page open in a browser on the daemon's host change settings,
-    localhost bind or not. Binding beyond localhost for a remote
-    Prometheus exposes control as well; where Prometheus runs is open.
-  - The TUI connects directly or follows a daemon (`--daemon URL`); it
-    never starts or stops one.
-  - Fixed: an unusable `--log-dir` fails at startup, and a failing log
-    is reported once, not every sample. `tui --daemon` times out its
-    status (5 s) and setting (70 s) requests, treats an event stream
-    silent for three 15 s keep-alives as dead, and decodes events as
-    bytes so a character split between chunks survives.
-  - Deferred to the always-on host: the systemd unit (`DynamicUser=`,
-    the key via `LoadCredential=`, and no `bluetooth` group, which
-    BlueZ's default D-Bus policy here does not need), and whether the
-    daemon survives a bluetoothd restart or host sleep.
-  - Fine as is: browsers cannot post JSON cross-origin without a
-    preflight the daemon never answers; queued settings apply in order;
-    each `/events` client buffers at most 64 updates; scanning stops
-    once the unit is found.
-  - Accepted: while the daemon runs, the phone app cannot connect.
+  `jackerymon` binary: `poll`, `set`, `tui`, `daemon`.
+- **The unit takes one BLE connection.**  Whatever holds it, a direct
+  TUI or the daemon, locks out the phone app and other clients.
+- **TUI.**  It consumes updates, not BLE, so it connects directly or
+  follows a daemon (`--daemon URL`); it never starts or stops one.  `m`
+  opens one inline settings list: ←/→ cycles a value, Enter applies it,
+  the menu stays open.  The requested value stays on screen while it
+  applies.  Each sample is aged by its own timestamp, so an old one
+  replayed by a daemon does not look fresh.
+- **Daemon.**  Owns the connection and retries forever.  HTTP on
+  `127.0.0.1:9888` by default: `GET /metrics` (Prometheus), `GET
+  /status`, `GET /events` (server-sent events, current state first),
+  `POST /settings` (the unit's one-key body; answers once status confirms
+  it, within 60 s including queueing).  Optional `--log-dir` writes daily
+  JSON-lines files; pruning is left to tmpfiles or logrotate.  Readings
+  older than 60 s are left out of `/metrics`.  When polling ends, by
+  signal or fatal error, HTTP stops too and the daemon exits with the
+  polling result, so a supervisor sees failures.
+- **Daemon access is unauthenticated, by the user's choice.**  Anyone who
+  can reach it can change settings: no token, peer, or `Host` check.
+  Accepted risks: DNS rebinding lets a web page in a browser on the
+  daemon's host reach it even on localhost, and binding beyond
+  localhost for a remote Prometheus exposes control too.  Browsers
+  cannot post JSON cross-origin without a preflight the daemon never
+  answers.
 
 ## Next steps and open questions
 
-1. Measure polling reliability and diagnose intermittent disconnects.
-   The unit sometimes turns its BLE/Wi-Fi radios off by itself; the
-   daemon must treat long absence as normal. Find what turns them off
-   and which button restores them; test whether continuous polling
-   keeps them on.
-2. Compare telemetry with the display under a known load.
-3. Reset/unbinding effect on the key remains unknown.
-4. Test the systemd unit; run the daemon for days to measure dropouts and
-   whether polling keeps the radios on.
+1. Run the daemon for days: dropouts, reconnects, stale-object removals,
+   and whether polling keeps the radios on.  Why the radios sometimes
+   turn off is unknown.
+2. On the always-on host: rework the systemd unit (`DynamicUser=`, the
+   key through `LoadCredential=`, no `bluetooth` group, which BlueZ's
+   default D-Bus policy does not need) and test whether the daemon
+   survives a bluetoothd restart and host sleep.
+3. Where Prometheus runs, and so whether the daemon binds beyond
+   localhost.
+4. Compare telemetry with the display under a known load.
+5. Reset/unbinding effect on the key.
 
 ## Housekeeping
 
 - `scratch/` holds a downloaded APK, its decompiled source, and the
   `jadx`/`apkeep` tools used for protocol research.  It is not ours and
-  must not be committed; keep it out of git (or delete it).
+  must not be committed.
