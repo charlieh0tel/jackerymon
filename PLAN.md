@@ -107,8 +107,9 @@ once the Rust key fetch matched it (it remains in git history).
 ## Next steps and open questions
 
 1. Run the daemon for days: dropouts, reconnects, stale-object removals,
-   and whether polling keeps the radios on.  Why the radios sometimes
-   turn off is unknown.
+   and whether polling keeps the radios on.  The radios turn off five
+   minutes after power-on if nothing connects (`FINDINGS.md`, Radio
+   controls); confirm that applies to this unit.
 2. On the always-on host: rework the systemd unit (`DynamicUser=`, the
    key through `LoadCredential=`, no `bluetooth` group, which BlueZ's
    default D-Bus policy does not need) and test whether the daemon

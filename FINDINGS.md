@@ -296,6 +296,19 @@ refused an unconfirmed emergency charge (409), `{"lm":9}`, and an
 empty body (400) without sending anything. `tui --daemon` showed live
 status and set the light low and off through the daemon.
 
+## Radio controls (Explorer 2000 Plus manual)
+
+The English manual for the Explorer 2000 Plus (JE-2000C; Home Depot's
+copy, read 2026-10-12) says Wi-Fi and Bluetooth turn on at power-on and
+turn off by themselves if no app connects within five minutes. Holding
+DC/USB and AC together turns them on or off; flashing icons mean the
+unit awaits a connection. Holding POWER and DC/USB for three seconds
+resets them to factory settings, reboots, and unbinds the app account.
+Whether the test unit (model code 12) is this model is unconfirmed, but
+the five-minute rule fits the radio-off episodes above, and pressing
+several buttons restored the radios once. Whether a reset changes the
+BLE key is unknown.
+
 ## Duplicate advertisement hides the unit (2026-10-12)
 
 The unit sends two kinds of connectable `ADV_IND` from the same six
