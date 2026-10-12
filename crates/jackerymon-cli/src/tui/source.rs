@@ -16,12 +16,20 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::connection::ConnectionArgs;
+use crate::daemon::EVENT_KEEP_ALIVE;
 use crate::record::Update;
 
 /// Delay before reconnecting to a daemon's event stream.
 const DAEMON_RETRY_DELAY: Duration = Duration::from_secs(2);
+/// How long to wait for the daemon's status at startup.
+const DAEMON_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long to wait for a setting: a little over the daemon's own limit,
+/// so its answer arrives first.
+const DAEMON_SETTING_TIMEOUT: Duration = Duration::from_secs(70);
+/// Keep-alives the event stream may miss before it counts as dead.
+const MISSED_KEEP_ALIVES: u32 = 3;
 /// Separates server-sent events.
-const EVENT_SEPARATOR: &str = "\n\n";
+const EVENT_SEPARATOR: &[u8] = b"\n\n";
 const EVENT_DATA_PREFIX: &str = "data:";
 
 /// A setting the screen asks for; a failure is answered with a message.
@@ -113,8 +121,15 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
 pub(super) async fn daemon(url: &str) -> Result<Source> {
     let url = url.trim_end_matches('/').to_owned();
     let client = reqwest::Client::new();
+    // Reads on the event stream time out, so a dead connection is noticed;
+    // a setting may take longer than that, so it uses `client`.
+    let events_client = reqwest::Client::builder()
+        .read_timeout(EVENT_KEEP_ALIVE * MISSED_KEEP_ALIVES)
+        .build()
+        .context("building the event stream client")?;
     let status: serde_json::Value = client
         .get(format!("{url}/status"))
+        .timeout(DAEMON_STATUS_TIMEOUT)
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
@@ -130,11 +145,11 @@ pub(super) async fn daemon(url: &str) -> Result<Source> {
     let (commands, mut asked) = mpsc::channel::<Command>(1);
     let (stop, stopped) = oneshot::channel::<()>();
     let follow = {
-        let (client, url) = (client.clone(), url.clone());
+        let url = url.clone();
         async move {
             let mut consecutive = 0;
             loop {
-                let error = follow_events(&client, &url, &sender, &mut consecutive).await;
+                let error = follow_events(&events_client, &url, &sender, &mut consecutive).await;
                 consecutive += 1;
                 let lost = Update::Lost {
                     error: format!("daemon: {error:#}"),
@@ -189,24 +204,35 @@ async fn follow_events(
         Err(error) => return error.into(),
     };
     let mut chunks = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     while let Some(chunk) = chunks.next().await {
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(error) => return error.into(),
         };
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(end) = buffer.find(EVENT_SEPARATOR) {
-            let event: String = buffer.drain(..end + EVENT_SEPARATOR.len()).collect();
-            for update in parse_event(&event) {
-                *consecutive = 0;
-                if sender.send(update).is_err() {
-                    return anyhow!("screen closed");
-                }
+        buffer.extend_from_slice(&chunk);
+        for update in drain_events(&mut buffer) {
+            *consecutive = 0;
+            if sender.send(update).is_err() {
+                return anyhow!("screen closed");
             }
         }
     }
     anyhow!("event stream ended")
+}
+
+/// Takes the complete events off the front of `buffer`, leaving a partial
+/// one.  Splitting on bytes keeps a character cut between chunks whole.
+fn drain_events(buffer: &mut Vec<u8>) -> Vec<Update> {
+    let mut updates = Vec::new();
+    while let Some(end) = buffer
+        .windows(EVENT_SEPARATOR.len())
+        .position(|window| window == EVENT_SEPARATOR)
+    {
+        let event: Vec<u8> = buffer.drain(..end + EVENT_SEPARATOR.len()).collect();
+        updates.extend(parse_event(&String::from_utf8_lossy(&event)));
+    }
+    updates
 }
 
 /// The updates in one server-sent event; malformed data is skipped.
@@ -221,6 +247,7 @@ fn parse_event(event: &str) -> Vec<Update> {
 async fn post_setting(client: &reqwest::Client, url: &str, setting: Setting) -> Result<(), String> {
     let response = client
         .post(format!("{url}/settings?confirm=true"))
+        .timeout(DAEMON_SETTING_TIMEOUT)
         .json(&setting.body())
         .send()
         .await
@@ -238,6 +265,7 @@ async fn post_setting(client: &reqwest::Client, url: &str, setting: Setting) -> 
 
 #[cfg(test)]
 mod tests {
+    use super::drain_events;
     use super::parse_event;
     use crate::record::Update;
 
@@ -247,5 +275,23 @@ mod tests {
         assert_eq!(parse_event(event), [Update::Connected { connection: 2 }]);
         assert!(parse_event(": keep-alive\n\n").is_empty());
         assert!(parse_event("data: not json\n\n").is_empty());
+    }
+
+    #[test]
+    fn character_split_between_chunks_survives() {
+        let event = "data: {\"type\":\"lost\",\"error\":\"searching…\",\"consecutive\":1}\n\n";
+        let bytes = event.as_bytes();
+        let split = event.find('…').expect("ellipsis") + 1;
+        let mut buffer = bytes[..split].to_vec();
+        assert!(drain_events(&mut buffer).is_empty());
+        buffer.extend_from_slice(&bytes[split..]);
+        assert_eq!(
+            drain_events(&mut buffer),
+            [Update::Lost {
+                error: "searching…".to_owned(),
+                consecutive: 1
+            }]
+        );
+        assert!(buffer.is_empty());
     }
 }

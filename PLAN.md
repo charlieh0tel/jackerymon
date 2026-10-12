@@ -142,6 +142,28 @@ Key bootstrap stays in Python.
   setting's 60 s deadline covers queueing, so a full queue cannot hold a
   request indefinitely. The TUI ages each sample by its own timestamp,
   so an old sample replayed by the daemon does not look fresh.
+- **Daemon adversarial review (2026-10-11).** Decided with the user:
+  - Settings stay open to anyone who can reach the daemon: no peer or
+    token check, and no `Host` check. Accepted risk: DNS rebinding lets
+    a web page open in a browser on the daemon's host change settings,
+    localhost bind or not. Binding beyond localhost for a remote
+    Prometheus exposes control as well; where Prometheus runs is open.
+  - The TUI connects directly or follows a daemon (`--daemon URL`); it
+    never starts or stops one.
+  - Fixed: an unusable `--log-dir` fails at startup, and a failing log
+    is reported once, not every sample. `tui --daemon` times out its
+    status (5 s) and setting (70 s) requests, treats an event stream
+    silent for three 15 s keep-alives as dead, and decodes events as
+    bytes so a character split between chunks survives.
+  - Deferred to the always-on host: the systemd unit (`DynamicUser=`,
+    the key via `LoadCredential=`, and no `bluetooth` group, which
+    BlueZ's default D-Bus policy here does not need), and whether the
+    daemon survives a bluetoothd restart or host sleep.
+  - Fine as is: browsers cannot post JSON cross-origin without a
+    preflight the daemon never answers; queued settings apply in order;
+    each `/events` client buffers at most 64 updates; scanning stops
+    once the unit is found.
+  - Accepted: while the daemon runs, the phone app cannot connect.
 
 ## Next steps and open questions
 

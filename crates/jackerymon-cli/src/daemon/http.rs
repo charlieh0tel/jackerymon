@@ -32,6 +32,7 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio_stream::wrappers::BroadcastStream;
 
+use super::EVENT_KEEP_ALIVE;
 use super::Shared;
 use super::metrics;
 use crate::record::Update;
@@ -93,7 +94,7 @@ async fn events(
                 .json_data(&update)
                 .expect("updates serialize to JSON"))
         });
-    Sse::new(updates).keep_alive(KeepAlive::default())
+    Sse::new(updates).keep_alive(KeepAlive::new().interval(EVENT_KEEP_ALIVE))
 }
 
 #[derive(Deserialize)]

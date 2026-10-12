@@ -16,6 +16,7 @@ use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::Context;
@@ -38,6 +39,9 @@ use crate::record::Update;
 const DEFAULT_LISTEN: &str = "127.0.0.1:9888";
 /// Updates buffered per `/events` client before it starts missing some.
 const EVENT_BUFFER: usize = 64;
+/// How often `/events` sends a comment while idle, so a client can tell
+/// a quiet daemon from a dead connection.
+pub(crate) const EVENT_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// Settings queued from HTTP while one is being applied.
 const COMMAND_BUFFER: usize = 8;
 
@@ -97,7 +101,13 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;
     let (shared, requests) = Shared::new(key_file.serial.to_string());
-    let mut log = arguments.log_dir.map(SampleLog::new);
+    let mut log = arguments
+        .log_dir
+        .map(SampleLog::new)
+        .transpose()
+        .context("sample log")?;
+    // Report a failing log once, not every sample, and say when it recovers.
+    let mut log_failing = false;
     let poller = {
         let shared = Arc::clone(&shared);
         async move {
@@ -109,10 +119,20 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
                 shutdown(),
                 move |event| {
                     let update = Update::from(event);
-                    if let (Some(log), Update::Sample(record)) = (&mut log, &update)
-                        && let Err(error) = log.write(record)
-                    {
-                        eprintln!("sample log: {error:#}");
+                    if let (Some(log), Update::Sample(record)) = (&mut log, &update) {
+                        match (log.write(record), log_failing) {
+                            (Err(error), false) => {
+                                eprintln!(
+                                    "sample log: {error:#}; reporting again once it recovers"
+                                );
+                                log_failing = true;
+                            }
+                            (Ok(()), true) => {
+                                eprintln!("sample log: writing again");
+                                log_failing = false;
+                            }
+                            _ => {}
+                        }
                     }
                     shared
                         .snapshot
