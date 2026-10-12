@@ -48,7 +48,7 @@ impl ConnectionArgs {
     }
 }
 
-fn positive_seconds(text: &str) -> Result<f64, String> {
+pub(crate) fn positive_seconds(text: &str) -> Result<f64, String> {
     match text.parse::<f64>() {
         Ok(seconds) if seconds.is_finite() && seconds > 0.0 => Ok(seconds),
         _ => Err("must be a positive number of seconds".to_owned()),

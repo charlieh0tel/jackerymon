@@ -6,6 +6,7 @@ use std::fmt;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use jackerymon::ble::Sighting;
 use jackerymon::frame::RawStatus;
 use jackerymon::poll::PollEvent;
 use jackerymon::poll::Sample;
@@ -48,6 +49,33 @@ impl From<&Sample> for SampleRecord {
 impl fmt::Display for SampleRecord {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&serde_json::to_string(self).map_err(|_| fmt::Error)?)
+    }
+}
+
+/// One unit heard in a scan, in the Python PoC's `--scan-only` line
+/// shape; the key file starts with the same fields.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct UnitRecord {
+    pub(crate) address: String,
+    pub(crate) serial: String,
+    /// Uppercase hex.
+    pub(crate) guid: String,
+    pub(crate) model: u16,
+    pub(crate) bind_counter: u16,
+    pub(crate) battery: Option<u8>,
+}
+
+impl From<&Sighting> for UnitRecord {
+    fn from(sighting: &Sighting) -> Self {
+        let advertisement = &sighting.advertisement;
+        Self {
+            address: sighting.address.clone(),
+            serial: advertisement.serial.to_string(),
+            guid: advertisement.guid.to_string(),
+            model: advertisement.model.0,
+            bind_counter: advertisement.bind_counter,
+            battery: advertisement.battery_percent,
+        }
     }
 }
 

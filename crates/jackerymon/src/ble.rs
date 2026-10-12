@@ -1,6 +1,8 @@
 //! BLE transport via bluer (BlueZ): find the saved unit, connect, and
 //! query.
 
+use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::num::NonZeroU8;
 use std::ops::ControlFlow;
@@ -28,6 +30,7 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::advertisement;
+use crate::advertisement::Advertisement;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
 use crate::frame::Request;
@@ -122,6 +125,55 @@ pub async fn poll(
     poll_with(unit, config, commands, stop, on_event).await
 }
 
+/// A Jackery unit heard during [`scan`].
+#[derive(Clone, Debug)]
+pub struct Sighting {
+    /// BLE address, as `XX:XX:XX:XX:XX:XX`.
+    pub address: String,
+    pub advertisement: Advertisement,
+}
+
+/// Listens for `duration` and returns every Jackery power station heard,
+/// one entry per address.  No connection is made.
+///
+/// # Errors
+///
+/// Fails if BlueZ cannot scan.
+pub async fn scan(adapter: &Adapter, duration: Duration) -> Result<Vec<Sighting>, BleError> {
+    adapter
+        .set_discovery_filter(DiscoveryFilter {
+            transport: DiscoveryTransport::Le,
+            duplicate_data: true,
+            uuids: HashSet::from([SERVICE]),
+            ..DiscoveryFilter::default()
+        })
+        .await?;
+    let mut heard_by_address = BTreeMap::new();
+    // Discovery stops when this stream is dropped.
+    let mut discovery = Box::pin(adapter.discover_devices_with_changes().await?);
+    let listening = async {
+        while let Some(event) = discovery.next().await {
+            if let AdapterEvent::DeviceAdded(address) = event
+                && let Some(advertisement) = heard(&adapter.device(address)?).await?
+            {
+                heard_by_address.insert(address, advertisement);
+            }
+        }
+        Ok::<(), BleError>(())
+    };
+    // Listening ends at the deadline; an early end is an error or silence.
+    if let Ok(result) = timeout(duration, listening).await {
+        result?;
+    }
+    Ok(heard_by_address
+        .into_iter()
+        .map(|(address, advertisement)| Sighting {
+            address: address.to_string(),
+            advertisement,
+        })
+        .collect())
+}
+
 /// The saved unit, reachable through one adapter.
 struct Unit {
     adapter: Adapter,
@@ -169,26 +221,9 @@ impl Unit {
     }
 
     async fn matches(&self, device: &Device) -> Result<bool, BleError> {
-        // BlueZ clears RSSI when a scan ends, so a value means the unit was
-        // heard during this one, not just remembered.
-        if device.rssi().await?.is_none() {
-            return Ok(false);
-        }
-        let Some(service_data) = device.service_data().await? else {
-            return Ok(false);
-        };
-        let Some(service_data) = service_data.get(&SERVICE) else {
-            return Ok(false);
-        };
-        let manufacturer = device.manufacturer_data().await?.unwrap_or_default();
-        let manufacturer = manufacturer
-            .iter()
-            .map(|(company, value)| (*company, value.as_slice()));
-        Ok(
-            advertisement::decode(manufacturer, service_data).is_some_and(|decoded| {
-                decoded.serial == self.key_file.serial && decoded.model == self.key_file.model
-            }),
-        )
+        Ok(heard(device).await?.is_some_and(|decoded| {
+            decoded.serial == self.key_file.serial && decoded.model == self.key_file.model
+        }))
     }
 
     /// Connects, resolves services, and subscribes to notifications.
@@ -346,6 +381,27 @@ impl Link for Connection {
         // error here means the link is already gone.
         self.device.disconnect().await.ok();
     }
+}
+
+/// The Jackery advertisement `device` sent during the current scan, if
+/// any.
+async fn heard(device: &Device) -> Result<Option<Advertisement>, BleError> {
+    // BlueZ clears RSSI when a scan ends, so a value means the device was
+    // heard during this one, not just remembered.
+    if device.rssi().await?.is_none() {
+        return Ok(None);
+    }
+    let Some(service_data) = device.service_data().await? else {
+        return Ok(None);
+    };
+    let Some(service_data) = service_data.get(&SERVICE) else {
+        return Ok(None);
+    };
+    let manufacturer = device.manufacturer_data().await?.unwrap_or_default();
+    let manufacturer = manufacturer
+        .iter()
+        .map(|(company, value)| (*company, value.as_slice()));
+    Ok(advertisement::decode(manufacturer, service_data))
 }
 
 /// A disconnect, or the end of the device's events (it was removed).

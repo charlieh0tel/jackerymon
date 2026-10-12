@@ -4,6 +4,7 @@ mod connection;
 mod daemon;
 mod poll;
 mod record;
+mod scan;
 mod set;
 mod tui;
 
@@ -14,6 +15,7 @@ use env_logger::Env;
 
 use crate::daemon::DaemonArgs;
 use crate::poll::PollArgs;
+use crate::scan::ScanArgs;
 use crate::set::SetArgs;
 use crate::tui::TuiArgs;
 
@@ -33,6 +35,8 @@ enum Command {
     /// Poll status on one connection; JSON lines on stdout, diagnostics on
     /// stderr.
     Poll(PollArgs),
+    /// List the Jackery units in range, as JSON lines; no connection.
+    Scan(ScanArgs),
     /// Live status screen; retries until the unit is reachable.
     Tui(TuiArgs),
     /// Change one setting and confirm it with a status read.
@@ -51,6 +55,7 @@ async fn main() -> Result<()> {
     }
     match command {
         Command::Poll(arguments) => poll::run(arguments).await,
+        Command::Scan(arguments) => scan::run(arguments).await,
         Command::Tui(arguments) => tui::run(arguments).await,
         Command::Set(arguments) => set::run(arguments).await,
         Command::Daemon(arguments) => daemon::run(arguments).await,

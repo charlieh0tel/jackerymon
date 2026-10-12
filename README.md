@@ -29,6 +29,7 @@ builds `jackerymon`.
 
 ```sh
 cargo test
+cargo run --release -- scan                  # units in range, no cloud
 cargo run --release -- poll                  # until Ctrl-C
 cargo run --release -- poll --count 12       # finite run
 cargo run --release -- poll --max-failures 0 # retry forever
