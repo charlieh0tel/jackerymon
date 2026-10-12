@@ -22,6 +22,7 @@ use bluer::gatt::remote::Characteristic;
 use bluer::gatt::remote::CharacteristicWriteRequest;
 use futures::Stream;
 use futures::StreamExt;
+use log::info;
 use thiserror::Error;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -140,6 +141,10 @@ impl Unit {
         // An error here means there is no object, which is fine.
         if device.address_type().await.ok() == Some(AddressType::LeRandom) {
             self.adapter.remove_device(self.address).await?;
+            info!(
+                "removed BlueZ's random-type object for {}, left by the unit's empty duplicate advertisement",
+                self.address
+            );
         }
         Ok(())
     }
@@ -239,6 +244,7 @@ impl Connector for Unit {
         // connected, and a connected unit does not advertise.
         let device = self.adapter.device(self.address)?;
         if device.is_connected().await.unwrap_or(false) {
+            info!("reusing the open BlueZ connection to {}", self.address);
             return self.open_or_disconnect(&device, limit).await;
         }
         self.clear_impostor().await?;

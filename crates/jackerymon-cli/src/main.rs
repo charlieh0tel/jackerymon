@@ -10,11 +10,16 @@ mod tui;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use env_logger::Env;
 
 use crate::daemon::DaemonArgs;
 use crate::poll::PollArgs;
 use crate::set::SetArgs;
 use crate::tui::TuiArgs;
+
+/// Log filter unless `RUST_LOG` overrides it: the library's notes, such as
+/// recovering the unit from a stale BlueZ object.
+const DEFAULT_LOG_FILTER: &str = "jackerymon=info";
 
 #[derive(Parser)]
 #[command(about, version)]
@@ -39,7 +44,12 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    // Log lines on stderr would corrupt the TUI's screen.
+    if !matches!(command, Command::Tui(_)) {
+        env_logger::Builder::from_env(Env::default().default_filter_or(DEFAULT_LOG_FILTER)).init();
+    }
+    match command {
         Command::Poll(arguments) => poll::run(arguments).await,
         Command::Tui(arguments) => tui::run(arguments).await,
         Command::Set(arguments) => set::run(arguments).await,

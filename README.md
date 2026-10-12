@@ -24,7 +24,8 @@ way; which of steps 2 and 3 produced it was not recorded.
 
 `crates/jackerymon` is the library: advertisement decoding, the
 model-12 GATT frame codec, key-file loading, typed status, BLE
-transport over BlueZ (`bluer`), and polling. `crates/jackerymon-cli` builds `jackerymon`.
+transport over BlueZ (`bluer`), and polling. `crates/jackerymon-cli`
+builds `jackerymon`.
 
 ```sh
 cargo test
@@ -55,6 +56,13 @@ connection, so the phone app cannot connect while it runs.
 PoC's `--address`, `--timeout`, `--interval`, and `--count`. Output
 matches the PoC's `--poll` JSON lines, except that keys inside `status` are
 sorted.
+
+Every command but `tui` logs notable BLE events to stderr, such as
+reusing a connection a killed process left open, or removing the stale
+BlueZ object the unit's duplicate advertisement can leave
+(`FINDINGS.md`). `RUST_LOG` changes the filter, which defaults to
+`jackerymon=info`.
+
 Linux needs BlueZ and the D-Bus development headers to build.
 
 ## Daemon

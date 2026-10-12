@@ -13,6 +13,7 @@ axum = "0.8.9"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
+env_logger = "0.11.11"
 futures = "0.3.34"
 jackerymon = { version = "0.1.0", path = "../jackerymon" }
 ratatui = "0.30.2"

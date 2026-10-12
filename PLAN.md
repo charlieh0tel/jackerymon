@@ -88,6 +88,10 @@ settings over HTTP. Key bootstrap stays in Python.
   a leftover connection and from a fresh scan, no failures, about 218 ms
   per query; bluetoothd logged no registration errors and the device
   object count stayed at 6.
+- **Library logging through `log`.** The library reports recoveries it
+  makes on its own (reusing a leftover connection, removing the stale
+  object) with `log::info!`; the CLI installs `env_logger` on stderr,
+  except for `tui`, whose screen stderr would corrupt.
 - **Property model follows the BLE wire keys.** `Status` types the
   documented keys and keeps every field in `raw`. Absent keys are `None`;
   wrong types fail; unknown enum values are kept as `Unknown`. Do not
