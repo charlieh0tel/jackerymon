@@ -72,6 +72,12 @@ Key bootstrap stays in Python.
   (use `btmon`/journal instead), no passive advertisement monitoring,
   no adapter control. Keep BLE in one small module so a switch to
   `bluer` stays cheap if disconnect diagnosis needs it.
+- **Switching to `bluer` (2026-10-12).** Decided by the user. The unit's
+  empty random-type advertisement can take over its BlueZ object and
+  hide it (`FINDINGS.md`, Duplicate advertisement); recovery needs
+  `RemoveDevice`, which btleplug lacks and `bluer` has. `bluer` also
+  avoids the bluez-async panic on a bluetoothd restart. Work happens on
+  branch `bluer`, behind the existing connector/link traits.
 - **Property model follows the BLE wire keys.** `Status` types the
   documented keys and keeps every field in `raw`. Absent keys are `None`;
   wrong types fail; unknown enum values are kept as `Unknown`. Do not

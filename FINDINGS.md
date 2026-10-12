@@ -289,6 +289,47 @@ refused an unconfirmed emergency charge (409), `{"lm":9}`, and an
 empty body (400) without sending anything. `tui --daemon` showed live
 status and set the light low and off through the daemon.
 
+## Duplicate advertisement hides the unit (2026-10-12)
+
+The unit sends two kinds of connectable `ADV_IND` from the same six
+address bytes. Most carry the public address type with the name,
+manufacturer data, and `0xbdee` service data; a scannable response
+follows. About one in ten carry the random address type and no data at
+all. A 30-second privileged `btmon` capture during an LE-only scan
+(user-run, 2026-10-12) counted 574 public and 59 random reports for
+`90:E5:B1:21:ED:BA`. The prefix is Espressif's, so the unit is
+ESP32-based; the second advertisement looks like a firmware
+configuration error, not a known ESP32 bug.
+
+BlueZ 5.79 keys a device by address and type but names its D-Bus object
+by address alone. Whichever kind it hears first after the unit's object
+is created owns that object; every report of the other kind fails with
+`device_new() Unable to register device interface`. Usually the public
+kind wins (12 of 12 times after `bluetoothctl remove`), and the empty
+random reports only produce that log noise. When the empty random kind
+wins, every advertisement carrying the identity is refused, discovery
+never matches the saved serial, and polling fails with "saved device
+identity not found" while the unit advertises with icons flashing. The
+random reports keep that object fresh, so it does not expire; the unit
+stayed unreachable from 05:47 UTC until bluetoothd was restarted.
+
+Evidence that the cause is BlueZ and the unit, not our client: a fresh
+bluetoothd with only `bluetoothctl scan le` running logged the same
+failures for the unit within a minute, and a classic-only scan saw
+nothing. The same failures, for many nearby devices, ran at about 3,000
+an hour on 2026-10-11 while our pollers scanned. Some earlier "not
+found" episodes may have been this; the ones where the user saw the
+icons off were not. Fix: when the saved address is present without the
+identity, remove the object (BlueZ `RemoveDevice`, no privilege
+needed) and scan again. btleplug cannot; `bluer` can (see `PLAN.md`).
+
+Restarting bluetoothd made bluez-async 0.9.0, under btleplug, panic in
+a worker thread (`messagestream.rs:40`, unwrap on "No match with that
+id found"); the poller survived.
+
+The host crash of 2026-10-11 09:50 was unrelated: the `xe` GPU driver
+failed to resume, a task hung on it, and suspend then failed.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

@@ -133,6 +133,11 @@ fragmented and must be reassembled.
 ### Advertisement
 
 - Local name `HT`.
+- The unit also sends empty connectable advertisements from the same
+  address bytes with the random address type, about one in ten. BlueZ
+  keeps one object per address, so if one of these registers first it
+  hides the real advertisements until the object is removed (see
+  `FINDINGS.md`, Duplicate advertisement).
 - Manufacturer data: reconstruct the two-byte company ID in little-endian
   order. Byte 0 is category (2 = Jackery device), byte 1 is the first
   ASCII serial character; append the remaining manufacturer bytes.
