@@ -45,6 +45,7 @@ use crate::connection::key_path;
 use crate::connection::positive_seconds;
 use crate::record::UnitRecord;
 use crate::scan;
+use crate::scan::DEFAULT_LISTEN_SECONDS;
 
 const API: &str = "https://iot.jackeryapp.com/v1/";
 /// The app's RSA key for wrapping the login's AES key (SPKI DER, base64).
@@ -76,7 +77,7 @@ pub(crate) struct KeyArgs {
     #[arg(long)]
     address: Option<String>,
     /// Seconds to listen for the unit.
-    #[arg(long, default_value_t = 10.0, value_parser = positive_seconds)]
+    #[arg(long, default_value_t = DEFAULT_LISTEN_SECONDS, value_parser = positive_seconds)]
     timeout: f64,
     /// Jackery account email; prompted if absent.
     #[arg(long)]
@@ -368,6 +369,7 @@ mod tests {
 
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
+    use jackerymon::identity::ModelCode;
     use jackerymon::key_file::KeyFile;
     use serde_json::json;
 
@@ -396,9 +398,18 @@ mod tests {
     fn login_fields_wrap_a_key_for_the_app() {
         let [(data_name, data), (key_name, wrapped)] = login_fields(b"{}").expect("fields");
         assert_eq!((data_name, key_name), ("aesEncryptData", "rsaForAesKey"));
-        assert_eq!(STANDARD.decode(data).expect("base64").len(), 16);
-        // A 1024-bit RSA key wraps to 128 bytes.
-        assert_eq!(STANDARD.decode(wrapped).expect("base64").len(), 128);
+        /// `{}` pads to one AES block.
+        const AES_BLOCK_LENGTH: usize = 16;
+        /// The app's 1024-bit RSA key wraps anything to this many bytes.
+        const RSA_CIPHERTEXT_LENGTH: usize = 128;
+        assert_eq!(
+            STANDARD.decode(data).expect("base64").len(),
+            AES_BLOCK_LENGTH
+        );
+        assert_eq!(
+            STANDARD.decode(wrapped).expect("base64").len(),
+            RSA_CIPHERTEXT_LENGTH
+        );
     }
 
     #[test]
@@ -408,7 +419,7 @@ mod tests {
                 address: "90:E5:B1:21:ED:BA".to_owned(),
                 serial: "123456789012345".to_owned(),
                 guid: "393931316135".to_owned(),
-                model: 12,
+                model: ModelCode::EXPLORER_2000.0,
                 bind_counter: 3,
                 battery: Some(100),
             },
@@ -448,7 +459,7 @@ mod tests {
                 address: "90:E5:B1:21:ED:BA".to_owned(),
                 serial: "123456789012345".to_owned(),
                 guid: "393931316135".to_owned(),
-                model: 12,
+                model: ModelCode::EXPLORER_2000.0,
                 bind_counter: 3,
                 battery: None,
             },

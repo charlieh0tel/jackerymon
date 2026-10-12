@@ -12,10 +12,13 @@ use jackerymon::ble::Sighting;
 use crate::connection::positive_seconds;
 use crate::record::UnitRecord;
 
+/// Seconds to listen for units, unless `--timeout` says otherwise.
+pub(crate) const DEFAULT_LISTEN_SECONDS: f64 = 10.0;
+
 #[derive(Args)]
 pub(crate) struct ScanArgs {
     /// Seconds to listen.
-    #[arg(long, default_value_t = 10.0, value_parser = positive_seconds)]
+    #[arg(long, default_value_t = DEFAULT_LISTEN_SECONDS, value_parser = positive_seconds)]
     timeout: f64,
     /// Only this BLE address.
     #[arg(long)]
