@@ -23,8 +23,8 @@ way; which of steps 2 and 3 produced it was not recorded.
 ## Rust
 
 `crates/jackerymon` is the library: advertisement decoding, the
-model-12 GATT frame codec, key-file loading, typed status, btleplug
-transport, and polling. `crates/jackerymon-cli` builds `jackerymon`.
+model-12 GATT frame codec, key-file loading, typed status, BLE
+transport over BlueZ (`bluer`), and polling. `crates/jackerymon-cli` builds `jackerymon`.
 
 ```sh
 cargo test

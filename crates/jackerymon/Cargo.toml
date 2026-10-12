@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 base64 = "0.23.1"
-btleplug = "0.13.5"
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
 futures = "0.3.34"
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }

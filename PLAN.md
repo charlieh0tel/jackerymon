@@ -32,12 +32,12 @@ After a 2026-10-05 power-cycle the unit stopped advertising for days
 cause unknown. The saved key then still worked: it survives power-cycle.
 
 The Rust library `crates/jackerymon` ports the codec, advertisement
-decoding, key-file loading, typed status, btleplug transport, and the
-poller from the PoC, with offline tests. `jackerymon poll` matched the
-PoC's live results on its first run, and `jackerymon tui` shows live
-status, `jackerymon set` and the TUI settings menu change settings, and
-`jackerymon daemon` serves status, metrics, and settings over HTTP.
-Key bootstrap stays in Python.
+decoding, key-file loading, typed status, BLE transport (btleplug, now
+`bluer`), and the poller from the PoC, with offline tests. `jackerymon
+poll` matched the PoC's live results on its first run, and `jackerymon
+tui` shows live status, `jackerymon set` and the TUI settings menu
+change settings, and `jackerymon daemon` serves status, metrics, and
+settings over HTTP. Key bootstrap stays in Python.
 
 ## Decisions
 
@@ -66,18 +66,28 @@ Key bootstrap stays in Python.
 - **BLE is the monitoring transport.** Focus development on the working
   Explorer BLE protocol. Design the Rust library around the validated
   session behavior; a generic multi-transport abstraction is not needed.
-- **BLE library: btleplug.** Chosen by the user over `bluer`. It covers
-  everything the PoC does (scan with manufacturer data, connect,
-  notify, write). Costs: generic errors hide BlueZ disconnect reasons
-  (use `btmon`/journal instead), no passive advertisement monitoring,
-  no adapter control. Keep BLE in one small module so a switch to
-  `bluer` stays cheap if disconnect diagnosis needs it.
+- **BLE library: btleplug (superseded by `bluer`).** Chosen by the user
+  over `bluer`. It covers everything the PoC does (scan with
+  manufacturer data, connect, notify, write). Costs: generic errors hide
+  BlueZ disconnect reasons (use `btmon`/journal instead), no passive
+  advertisement monitoring, no adapter control. Keep BLE in one small
+  module so a switch to `bluer` stays cheap if disconnect diagnosis
+  needs it.
 - **Switching to `bluer` (2026-10-12).** Decided by the user. The unit's
   empty random-type advertisement can take over its BlueZ object and
   hide it (`FINDINGS.md`, Duplicate advertisement); recovery needs
   `RemoveDevice`, which btleplug lacks and `bluer` has. `bluer` also
-  avoids the bluez-async panic on a bluetoothd restart. Work happens on
-  branch `bluer`, behind the existing connector/link traits.
+  avoids the bluez-async panic on a bluetoothd restart. Done behind the
+  existing connector/link traits. Each connect first reuses a
+  connection left open by a process that exited without disconnecting
+  (a connected unit does not advertise), then removes a random-type
+  object holding the unit's address, then scans LE only with a discovery
+  pattern of the unit's address, so BlueZ makes no objects for other
+  devices. A match must have an RSSI, meaning it was heard during this
+  scan. Live check (2026-10-12): 12 samples on one connection both from
+  a leftover connection and from a fresh scan, no failures, about 218 ms
+  per query; bluetoothd logged no registration errors and the device
+  object count stayed at 6.
 - **Property model follows the BLE wire keys.** `Status` types the
   documented keys and keeps every field in `raw`. Absent keys are `None`;
   wrong types fail; unknown enum values are kept as `Unknown`. Do not
@@ -95,7 +105,7 @@ Key bootstrap stays in Python.
   artifact sharing key-file and BLE options; the daemon binary carries
   TUI code, which is acceptable. Monitoring only; control commands later.
 - **Polling lives in the library.** `poll` is generic over a small
-  connector/link pair so its retry policy is tested offline; btleplug
+  connector/link pair so its retry policy is tested offline; `bluer`
   implements it. Events go to a callback that can stop polling; a stop
   future (Ctrl-C) also closes the connection. The failure limit is
   optional: `poll` defaults to three like the PoC, a monitor retries
