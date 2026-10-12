@@ -304,7 +304,16 @@ async fn request(
         .json()
         .await
         .map_err(|_| anyhow::anyhow!("{path}: invalid JSON response"))?;
+    open_envelope(path, envelope)
+}
+
+/// The `data` and `token` of a successful API envelope.  A failure names
+/// the code only, since the rest may echo account details.
+fn open_envelope(path: &str, mut envelope: Value) -> Result<(Value, Option<String>)> {
     let code = &envelope["code"];
+    if !code.is_number() {
+        bail!("{path}: response has no API code");
+    }
     if code != 0 {
         bail!("{path}: API error code {code}");
     }
@@ -312,7 +321,7 @@ async fn request(
         .as_str()
         .filter(|token| !token.is_empty())
         .map(str::to_owned);
-    Ok((envelope["data"].clone(), token))
+    Ok((envelope["data"].take(), token))
 }
 
 fn fetched(data: Value) -> Result<Fetched> {
@@ -354,6 +363,9 @@ fn encrypt_body(key: &str, body: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use jackerymon::key_file::KeyFile;
@@ -363,6 +375,8 @@ mod tests {
     use super::KeyRecord;
     use super::encrypt_body;
     use super::login_fields;
+    use super::open_envelope;
+    use super::save;
     use crate::record::UnitRecord;
 
     /// Ciphertext from Python's `cryptography`, as the PoC encrypts.
@@ -408,5 +422,47 @@ mod tests {
         let key_file = KeyFile::parse(&text).expect("parse");
         assert_eq!(key_file.serial.as_str(), "123456789012345");
         assert!(text.contains("\"bind_counter\": 3"));
+    }
+
+    #[test]
+    fn api_errors_name_only_the_code() {
+        let failure = json!({"code": 10001, "msg": "bad password for a@example.com", "data": null});
+        let error = open_envelope("auth/login", failure)
+            .expect_err("failure")
+            .to_string();
+        assert_eq!(error, "auth/login: API error code 10001");
+        let success = json!({"code": 0, "token": "t", "data": {"bluetoothKey": "k"}});
+        let (data, token) = open_envelope("auth/login", success).expect("success");
+        assert_eq!(
+            (data["bluetoothKey"].as_str(), token.as_deref()),
+            (Some("k"), Some("t"))
+        );
+        assert!(open_envelope("auth/login", json!({"data": 1})).is_err());
+    }
+
+    #[test]
+    fn key_file_is_private_and_never_overwritten() {
+        let path = std::env::temp_dir().join(format!("jackerymon-key-{}.json", std::process::id()));
+        let record = || KeyRecord {
+            unit: UnitRecord {
+                address: "90:E5:B1:21:ED:BA".to_owned(),
+                serial: "123456789012345".to_owned(),
+                guid: "393931316135".to_owned(),
+                model: 12,
+                bind_counter: 3,
+                battery: None,
+            },
+            fetched: Fetched {
+                bluetooth_key: "a2V5".to_owned(),
+                model_code: json!(12),
+                region: json!(null),
+            },
+        };
+        save(&path, &record()).expect("first save");
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+        let again = save(&path, &record());
+        fs::remove_file(&path).expect("cleanup");
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(again.is_err(), "an existing key file is never replaced");
     }
 }
