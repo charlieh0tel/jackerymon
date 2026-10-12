@@ -2,6 +2,7 @@
 
 mod connection;
 mod daemon;
+mod daemon_client;
 mod key;
 mod poll;
 mod record;

@@ -32,6 +32,7 @@ use tokio::time::Instant;
 use tokio::time::interval;
 
 use crate::connection::ConnectionArgs;
+use crate::daemon_client::Endpoint;
 use crate::record::Update;
 use crate::tui::menu::Menu;
 use crate::tui::menu::controls;
@@ -54,7 +55,7 @@ pub(crate) struct TuiArgs {
 
 pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
     let mut source = match &arguments.daemon {
-        Some(url) => source::daemon(url).await?,
+        Some(url) => source::daemon(&Endpoint::Tcp(url.clone())).await?,
         None => source::direct(&arguments.connection).await?,
     };
     let mut monitor = Monitor::new(source.serial.clone());
