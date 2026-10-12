@@ -20,7 +20,9 @@ Expected: any Linux machine whose adapter BlueZ supports.  Other
 Explorers in the app's `HT` line probably share the protocol, but some
 use a codec variant with an IV; jackerymon refuses any model but 12
 until one is tested.  The Explorer 2000 Ultra (`HL` line) uses a
-different protocol and will not work.
+different protocol and will not work.  HomePower units (app model codes
+3001-3004) encrypt BLE frames with AES-CBC instead of RC4 and likely use
+other status keys; support awaits a unit to test.
 
 ## Wi-Fi and Bluetooth
 

@@ -184,6 +184,21 @@ validated with a live GATT status query. The specific bootstrap endpoint
 used was not recorded. Key files hold only selected device metadata and
 the key, never the password or account token.
 
+### Codec by device type
+
+The app picks the frame codec by the model's device type (`hb/d.java`,
+model table `ib/b.java`):
+
+| Type | Model codes | Codec |
+|---|---|---|
+| Portable (Explorer) | 1-40 | RC4 (`hb/g`, no IV) unless the model spec asks for a fixed IV (`hb/f`) or random IV (`hb/e`) |
+| Home (HomePower) | 3001-3004 | AES-CBC, PKCS#7, random IV prepended (`hb/e`) |
+| Box | 2001-2002 | `hb/b` |
+| Accessory | 4001-4008 | `hb/a` |
+
+Only code 12 (RC4, no IV) is implemented and tested. Which product name
+each code belongs to is not mapped.
+
 ### Frame format
 
 The wire carries binary bytes; the APK represents them as hex strings.
