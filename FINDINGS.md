@@ -110,6 +110,10 @@ entry `user_cache_id_bind_devices` (`ce/d.java`, `ce/h.java`). Successful
 Explorer unbinding removes the device and rewrites that cache
 (`PortableSettingActivity.java`). The user's phone is unrooted and the
 unit was unbound before bootstrap; cache extraction was not needed.
+`jackerymon key` (Rust, 2026-10-12) fetched the key by lookup, without
+binding, and wrote a file whose key and fields equal the PoC's; a poll
+with it succeeded. `jackerymon scan` printed the same line as the PoC's
+`--scan-only`.
 Which path produced the 2026-10-04 key, `device/bluetoothKey` lookup or
 `--bind`, was not recorded and the user does not remember.
 

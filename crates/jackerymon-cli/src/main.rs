@@ -2,6 +2,7 @@
 
 mod connection;
 mod daemon;
+mod key;
 mod poll;
 mod record;
 mod scan;
@@ -14,6 +15,7 @@ use clap::Subcommand;
 use env_logger::Env;
 
 use crate::daemon::DaemonArgs;
+use crate::key::KeyArgs;
 use crate::poll::PollArgs;
 use crate::scan::ScanArgs;
 use crate::set::SetArgs;
@@ -37,6 +39,9 @@ enum Command {
     Poll(PollArgs),
     /// List the Jackery units in range, as JSON lines; no connection.
     Scan(ScanArgs),
+    /// Fetch a unit's BLE key from Jackery's cloud, once; prompts for the
+    /// account password.
+    Key(KeyArgs),
     /// Live status screen; retries until the unit is reachable.
     Tui(TuiArgs),
     /// Change one setting and confirm it with a status read.
@@ -55,6 +60,7 @@ async fn main() -> Result<()> {
     }
     match command {
         Command::Poll(arguments) => poll::run(arguments).await,
+        Command::Key(arguments) => key::run(arguments).await,
         Command::Scan(arguments) => scan::run(arguments).await,
         Command::Tui(arguments) => tui::run(arguments).await,
         Command::Set(arguments) => set::run(arguments).await,

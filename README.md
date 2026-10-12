@@ -6,19 +6,19 @@ and [FINDINGS.md](FINDINGS.md).
 ## Getting your key
 
 Talking to the unit needs its per-device BLE key, which only Jackery's
-cloud hands out. Getting it is a one-time step done with the Python PoC
-(details below and in `docs/protocol.md`):
+cloud hands out. Getting it is a one-time step:
 
-1. Wake the unit and check it is visible:
-   `uv run tools/jackery_key.py --scan-only`.
-2. Fetch the key with your Jackery account (email and password are
-   prompted): `uv run tools/jackery_key.py --address <unit address>`.
+1. Wake the unit and check it is in range: `jackerymon scan`.
+2. Fetch the key with your Jackery account, in a terminal (email and
+   password are prompted): `jackerymon key`. With several units in
+   range, add `--address`.
 3. If the unit is not bound to your account, add `--bind`. This binds it
    to the account and takes the key from the bind response.
 
-This writes `jackery-key.json` (mode 0600); move it to
-`~/.config/jackerymon/<serial>.json`. Everything after that uses only
-BLE.
+This writes `~/.config/jackerymon/<serial>.json` (mode 0600, directory
+0700) and never overwrites an existing file; `--output` writes
+elsewhere. The password and the session token are never printed or
+saved. Everything after that uses only BLE.
 
 Keys live one file per unit: `~/.config/jackerymon/<serial>.json` for
 every command but `daemon`, which reads `/etc/jackerymon/<serial>.json`.
@@ -36,6 +36,7 @@ builds `jackerymon`.
 ```sh
 cargo test
 cargo run --release -- scan                  # units in range, no cloud
+cargo run --release -- key                   # fetch the key, once
 cargo run --release -- poll                  # until Ctrl-C
 cargo run --release -- poll --count 12       # finite run
 cargo run --release -- poll --max-failures 0 # retry forever
@@ -120,6 +121,9 @@ the error, so systemd can restart it; on SIGINT or SIGTERM it closes
 group, and paths against your system before installing it.
 
 ## Python BLE PoC
+
+Superseded by `jackerymon scan`, `key`, and `poll`; kept for now as a
+cross-check.
 
 Requires Python 3.11+, uv, and a working Bluetooth adapter. On Linux,
 BlueZ must be running. Dependencies are declared in the script; uv

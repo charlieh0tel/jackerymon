@@ -8,7 +8,8 @@ and measurements belong in [FINDINGS.md](FINDINGS.md), not here.
 
 A Rust workspace for monitoring Jackery units over BLE: a library, a
 logging daemon, a TUI, and a Prometheus exporter.  The Explorer protocol
-was proven with a small Python PoC (`tools/jackery_key.py`), then ported.
+was proven with a small Python PoC (`tools/jackery_key.py`), then ported;
+the PoC stays as a cross-check until dropped.
 
 ## Decisions
 
@@ -20,8 +21,10 @@ was proven with a small Python PoC (`tools/jackery_key.py`), then ported.
 - **Cloud only for the key.**  The user authorized reproducing the app's
   cloud key retrieval as a one-time bootstrap.  Monitoring and control
   never touch the cloud.
-- **Key bootstrap stays in Python.**  A one-time step; porting it buys
-  nothing.  Python tooling uses uv inline script dependencies.
+- **Key bootstrap is `jackerymon key`.**  It is always built in; the
+  one-time cloud step lives in one CLI module, and the library stays
+  cloud-free.  It never binds unless asked (`--bind` changes which
+  account owns the unit).
 - **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
   interactive commands, `/etc/jackerymon/` for the daemon; `--unit
   SERIAL` chooses, and is optional when one key is present.  The file
