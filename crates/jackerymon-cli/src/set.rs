@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::connection::ConnectionArgs;
+use crate::connection::KeyHome;
 
 /// Consecutive transport failures before giving up, as `poll` does.
 const MAX_FAILURES: NonZeroU32 = NonZeroU32::new(3).expect("nonzero");
@@ -182,7 +183,7 @@ pub(crate) async fn run(arguments: SetArgs) -> Result<()> {
     {
         bail!("{setting}: {warning}; pass --yes to confirm");
     }
-    let key_file = arguments.connection.key_file()?;
+    let key_file = arguments.connection.key_file(KeyHome::User)?;
     let config = arguments.connection.poll_config(Some(MAX_FAILURES));
     let adapter = ble::default_adapter().await?;
     let (sender, commands) = mpsc::channel(1);

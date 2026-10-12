@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::connection::ConnectionArgs;
+use crate::connection::KeyHome;
 use crate::daemon::EVENT_KEEP_ALIVE;
 use crate::record::Update;
 
@@ -60,7 +61,7 @@ impl Source {
 
 /// Polls the unit over BLE in this process.
 pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
-    let key_file = connection.key_file()?;
+    let key_file = connection.key_file(KeyHome::User)?;
     let serial = key_file.serial.to_string();
     // A monitor keeps trying while the unit's radio is off.
     let config = connection.poll_config(None);

@@ -32,6 +32,7 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::connection::ConnectionArgs;
+use crate::connection::KeyHome;
 use crate::daemon::log::SampleLog;
 use crate::daemon::state::Snapshot;
 use crate::record::Update;
@@ -93,7 +94,7 @@ impl Shared {
 }
 
 pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
-    let key_file = arguments.connection.key_file()?;
+    let key_file = arguments.connection.key_file(KeyHome::System)?;
     // A daemon keeps trying while the unit's radio is off.
     let config = arguments.connection.poll_config(None);
     let adapter = ble::default_adapter().await?;

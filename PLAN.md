@@ -22,6 +22,14 @@ was proven with a small Python PoC (`tools/jackery_key.py`), then ported.
   never touch the cloud.
 - **Key bootstrap stays in Python.**  A one-time step; porting it buys
   nothing.  Python tooling uses uv inline script dependencies.
+- **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
+  interactive commands, `/etc/jackerymon/` for the daemon; `--unit
+  SERIAL` chooses, and is optional when one key is present.  The file
+  format is the PoC's, so either writes keys the other reads.
+- **Several units: one daemon per unit.**  Each instance owns one unit's
+  connection and port; one adapter can hold several connections.  A
+  systemd template (`jackerymon@<serial>`) comes with the always-on
+  host.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty
   random-type advertisement can take over its BlueZ object and hide it
   (`FINDINGS.md`, Duplicate advertisement).  Recovery needs BlueZ

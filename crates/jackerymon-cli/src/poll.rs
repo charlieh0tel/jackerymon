@@ -13,6 +13,7 @@ use tokio::signal::ctrl_c;
 use tokio::time::Instant;
 
 use crate::connection::ConnectionArgs;
+use crate::connection::KeyHome;
 use crate::record::SampleRecord;
 
 #[derive(Args)]
@@ -36,7 +37,7 @@ struct Summary {
 }
 
 pub(crate) async fn run(arguments: PollArgs) -> Result<()> {
-    let key_file = arguments.connection.key_file()?;
+    let key_file = arguments.connection.key_file(KeyHome::User)?;
     let config = arguments
         .connection
         .poll_config(NonZeroU32::new(arguments.max_failures));

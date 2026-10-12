@@ -11,9 +11,8 @@ User=jackerymon
 SupplementaryGroups=bluetooth
 ConfigurationDirectory=jackerymon
 LogsDirectory=jackerymon
-ExecStart=/usr/local/bin/jackerymon daemon \
-    --key-file /etc/jackerymon/jackery-key.json \
-    --log-dir /var/log/jackerymon
+# Reads its key from /etc/jackerymon/<serial>.json.
+ExecStart=/usr/local/bin/jackerymon daemon --log-dir /var/log/jackerymon
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

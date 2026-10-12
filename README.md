@@ -16,9 +16,15 @@ cloud hands out. Getting it is a one-time step done with the Python PoC
 3. If the unit is not bound to your account, add `--bind`. This binds it
    to the account and takes the key from the bind response.
 
-This writes `jackery-key.json` (mode 0600). Everything after that,
-Python or Rust, uses only BLE. The test unit's key was obtained this
-way; which of steps 2 and 3 produced it was not recorded.
+This writes `jackery-key.json` (mode 0600); move it to
+`~/.config/jackerymon/<serial>.json`. Everything after that uses only
+BLE.
+
+Keys live one file per unit: `~/.config/jackerymon/<serial>.json` for
+every command but `daemon`, which reads `/etc/jackerymon/<serial>.json`.
+`--unit SERIAL` picks a unit and may be left out when there is one key;
+`--key-file` names a file directly. One daemon serves one unit; run one
+per unit for several.
 
 ## Rust
 
@@ -53,10 +59,9 @@ shows each change's progress and result. `q`, Esc, or Ctrl-C quits and
 closes the connection. It holds the unit's only BLE
 connection, so the phone app cannot connect while it runs.
 
-`poll` reads `jackery-key.json` (`--key-file` to change) and takes the
-PoC's `--address`, `--timeout`, `--interval`, and `--count`. Output
-matches the PoC's `--poll` JSON lines, except that keys inside `status` are
-sorted.
+`poll` finds its key as above and takes the PoC's `--address`,
+`--timeout`, `--interval`, and `--count`. Output matches the PoC's
+`--poll` JSON lines, except that keys inside `status` are sorted.
 
 Every command but `tui` logs notable BLE events to stderr, such as
 reusing a connection a killed process left open, or removing the stale
