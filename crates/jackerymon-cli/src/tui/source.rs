@@ -51,7 +51,7 @@ impl Source {
 
 /// Polls the unit over BLE in this process.
 pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
-    let key_file = connection.key_file(KeyHome::User)?;
+    let (key_file, lock) = connection.claim(KeyHome::User)?;
     let serial = key_file.serial.to_string();
     // A monitor keeps trying while the unit's radio is off.
     let config = connection.poll_config(None);
@@ -95,6 +95,8 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
         }
     };
     let task = tokio::spawn(async move {
+        // Held for as long as the source polls.
+        let _lock = lock;
         let (polled, ()) = tokio::join!(poll, forward);
         polled.context("polling failed")
     });
@@ -109,9 +111,9 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
 
 /// Follows a running `jackerymon daemon`.  The daemon owns the unit; this
 /// only reads its events and posts settings to it.
-pub(super) async fn daemon(endpoint: &Endpoint) -> Result<Source> {
-    let client = DaemonClient::new(endpoint)?;
-    let serial = client.serial().await?;
+/// Fails if the daemon owns a unit other than `expected`.
+pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Result<Source> {
+    let (client, serial) = DaemonClient::connect(endpoint, expected).await?;
     let (sender, updates) = mpsc::unbounded_channel();
     let (commands, mut asked) = mpsc::channel::<Command>(1);
     let (stop, stopped) = oneshot::channel::<()>();

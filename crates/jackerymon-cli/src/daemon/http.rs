@@ -45,13 +45,18 @@ const SETTING_TIMEOUT: Duration = Duration::from_secs(60);
 /// Prometheus text exposition format, version 0.0.4.
 const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
-pub(super) fn router(shared: Arc<Shared>) -> Router {
-    Router::new()
+/// The routes, with `POST /settings` only when `control` is set.
+pub(super) fn router(shared: Arc<Shared>, control: bool) -> Router {
+    let reads = Router::new()
         .route("/metrics", get(metrics))
         .route("/status", get(status))
-        .route("/events", get(events))
-        .route("/settings", post(settings))
-        .with_state(shared)
+        .route("/events", get(events));
+    let routes = if control {
+        reads.route("/settings", post(settings))
+    } else {
+        reads
+    };
+    routes.with_state(shared)
 }
 
 async fn metrics(State(shared): State<Arc<Shared>>) -> impl IntoResponse {

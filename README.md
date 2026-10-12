@@ -63,29 +63,35 @@ jackerymon daemon          # HTTP status, metrics, events, settings
 ```
 
 `set` and the TUI report a change only once a status read shows it.
-Turning emergency charging on needs `--yes`, or y in the TUI.  The unit
-takes one BLE connection, so while any of these runs, the phone app
-cannot connect.
+Turning emergency charging on needs `--yes`, or y in the TUI.
+
+The unit takes one BLE connection, so one jackerymon holds it at a time
+(a lock in `/run/lock`), and while one does the phone app cannot
+connect.  If a daemon is running, `tui` and `set` find it and go
+through it; `--direct` connects to the unit instead, and `--daemon`
+names a daemon by URL or socket.
 
 Commands other than `tui` log BLE recoveries to stderr; `RUST_LOG`
 sets the filter.
 
 ## Daemon
 
-`jackerymon daemon` holds the connection and serves HTTP on
-`127.0.0.1:9888` (`--listen`):
+`jackerymon daemon` holds the connection.  It serves the full API on a
+Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (under systemd,
+`/run/jackerymon/`), and a read-only subset over TCP on
+`127.0.0.1:9888` (`--listen`) for Prometheus:
 
-| Route | Gives |
-|---|---|
-| `GET /status` | link state, counters, latest sample |
-| `GET /metrics` | Prometheus `jackery_*` metrics |
-| `GET /events` | server-sent events: current state, then changes |
-| `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied |
+| Route | Gives | TCP |
+|---|---|---|
+| `GET /status` | link state, counters, latest sample | yes |
+| `GET /metrics` | Prometheus `jackery_*` metrics | yes |
+| `GET /events` | server-sent events: current state, then changes | yes |
+| `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | with `--tcp-control` |
 
 ```sh
-curl -s -X POST -H 'content-type: application/json' -d '{"oac":1}' \
-    localhost:9888/settings
-jackerymon tui --daemon http://127.0.0.1:9888
+curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
+    -X POST -H 'content-type: application/json' -d '{"oac":1}' \
+    http://localhost/settings
 ```
 
 Setting keys and values are in `docs/protocol.md`.  Emergency charging
@@ -93,9 +99,10 @@ needs `?confirm=true`.  A setting not sent within 60 s is dropped.
 `/metrics` omits readings older than 60 s.  `--log-dir` writes a
 JSON-lines file per UTC day, about 10 MB.
 
-The API has no authentication and can switch outputs.  Expose it only on
-a trusted network; even on localhost, a web page can reach it through
-DNS rebinding.
+The socket's directory decides who may use it: a user's daemon is
+private; the system daemon's, for now, is open to every local user.
+TCP has no authentication; `--tcp-control` lets anyone who reaches it,
+including a web page through DNS rebinding, switch outputs.
 
 `contrib/systemd/` has an untested service unit and a rule that deletes
 logs after 30 days.

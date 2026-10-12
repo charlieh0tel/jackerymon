@@ -32,7 +32,7 @@ use tokio::time::Instant;
 use tokio::time::interval;
 
 use crate::connection::ConnectionArgs;
-use crate::daemon_client::Endpoint;
+use crate::daemon_client::RouteArgs;
 use crate::record::Update;
 use crate::tui::menu::Menu;
 use crate::tui::menu::controls;
@@ -47,15 +47,15 @@ const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 pub(crate) struct TuiArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
-    /// Follow a running `jackerymon daemon` at this URL instead of
-    /// connecting to the unit; the connection options are then unused.
-    #[arg(long, value_name = "URL")]
-    daemon: Option<String>,
+    #[command(flatten)]
+    route: RouteArgs,
 }
 
 pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
-    let mut source = match &arguments.daemon {
-        Some(url) => source::daemon(&Endpoint::Tcp(url.clone())).await?,
+    let unit = arguments.connection.named_unit()?;
+    let endpoint = arguments.route.endpoint(unit.as_deref())?;
+    let mut source = match &endpoint {
+        Some(endpoint) => source::daemon(endpoint, unit.as_deref()).await?,
         None => source::direct(&arguments.connection).await?,
     };
     let mut monitor = Monitor::new(source.serial.clone());

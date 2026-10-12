@@ -1,16 +1,21 @@
 //! A client for a running `jackerymon daemon`.
 
+use std::fmt;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::bail;
+use clap::Args;
 use futures::StreamExt;
 use jackerymon::control::Setting;
 use tokio::sync::mpsc;
 
 use crate::daemon::EVENT_KEEP_ALIVE;
 use crate::record::Update;
+use crate::runtime;
 
 /// How long to wait for the daemon's status at startup.
 const DAEMON_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
@@ -23,10 +28,63 @@ const MISSED_KEEP_ALIVES: u32 = 3;
 const EVENT_SEPARATOR: &[u8] = b"\n\n";
 const EVENT_DATA_PREFIX: &str = "data:";
 
+/// Base URL for requests over a Unix socket; the host is not used.
+pub(crate) const SOCKET_BASE: &str = "http://localhost";
+/// Prefixes that make `--daemon` a URL rather than a socket path.
+const URL_SCHEMES: [&str; 2] = ["http://", "https://"];
+
 /// Where a daemon answers.
 pub(crate) enum Endpoint {
     /// Base URL, such as `http://127.0.0.1:9888`.
     Tcp(String),
+    /// The daemon's Unix socket.
+    Unix(PathBuf),
+}
+
+impl fmt::Display for Endpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tcp(url) => formatter.write_str(url),
+            Self::Unix(path) => write!(formatter, "{}", path.display()),
+        }
+    }
+}
+
+impl Endpoint {
+    /// A URL for TCP, anything else a socket path.
+    fn parse(text: &str) -> Self {
+        if URL_SCHEMES.iter().any(|scheme| text.starts_with(scheme)) {
+            Self::Tcp(text.to_owned())
+        } else {
+            Self::Unix(PathBuf::from(text))
+        }
+    }
+}
+
+/// How a client reaches the unit: through a daemon or directly.
+#[derive(Args)]
+pub(crate) struct RouteArgs {
+    /// Use the daemon at this URL or socket path.  By default a running
+    /// daemon's socket is found and used.
+    #[arg(long, value_name = "URL_OR_SOCKET", conflicts_with = "direct")]
+    daemon: Option<String>,
+    /// Connect to the unit directly even if a daemon is running.
+    #[arg(long)]
+    direct: bool,
+}
+
+impl RouteArgs {
+    /// The daemon to use for `unit`, the one named on the command line if
+    /// any, or `None` to connect directly.
+    pub(crate) fn endpoint(&self, unit: Option<&str>) -> Result<Option<Endpoint>> {
+        if let Some(daemon) = &self.daemon {
+            return Ok(Some(Endpoint::parse(daemon)));
+        }
+        if self.direct {
+            return Ok(None);
+        }
+        Ok(runtime::find(unit)?.map(Endpoint::Unix))
+    }
 }
 
 /// Requests to one daemon.
@@ -40,20 +98,46 @@ pub(crate) struct DaemonClient {
 }
 
 impl DaemonClient {
-    pub(crate) fn new(endpoint: &Endpoint) -> Result<Self> {
-        let Endpoint::Tcp(url) = endpoint;
+    fn new(endpoint: &Endpoint) -> Result<Self> {
+        let (base, socket) = match endpoint {
+            Endpoint::Tcp(url) => (url.trim_end_matches('/').to_owned(), None),
+            Endpoint::Unix(path) => (SOCKET_BASE.to_owned(), Some(path.clone())),
+        };
+        let builder = || {
+            let builder = reqwest::Client::builder();
+            match &socket {
+                Some(path) => builder.unix_socket(path.clone()),
+                None => builder,
+            }
+        };
         Ok(Self {
-            base: url.trim_end_matches('/').to_owned(),
-            client: reqwest::Client::new(),
-            events: reqwest::Client::builder()
+            base,
+            client: builder().build().context("building the daemon client")?,
+            events: builder()
                 .read_timeout(EVENT_KEEP_ALIVE * MISSED_KEEP_ALIVES)
                 .build()
                 .context("building the event stream client")?,
         })
     }
 
+    /// A client for the daemon at `endpoint`, with the serial of the unit
+    /// it owns.  Fails if that is not `expected`, when one is named.
+    pub(crate) async fn connect(
+        endpoint: &Endpoint,
+        expected: Option<&str>,
+    ) -> Result<(Self, String)> {
+        let client = Self::new(endpoint)?;
+        let serial = client.serial().await?;
+        if let Some(expected) = expected
+            && serial != expected
+        {
+            bail!("the daemon at {endpoint} owns unit {serial}, not {expected}");
+        }
+        Ok((client, serial))
+    }
+
     /// The serial of the unit the daemon owns.
-    pub(crate) async fn serial(&self) -> Result<String> {
+    async fn serial(&self) -> Result<String> {
         let status: serde_json::Value = self
             .client
             .get(format!("{}/status", self.base))

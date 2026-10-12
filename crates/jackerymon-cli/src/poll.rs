@@ -37,7 +37,7 @@ struct Summary {
 }
 
 pub(crate) async fn run(arguments: PollArgs) -> Result<()> {
-    let key_file = arguments.connection.key_file(KeyHome::User)?;
+    let (key_file, _lock) = arguments.connection.claim(KeyHome::User)?;
     let config = arguments
         .connection
         .poll_config(NonZeroU32::new(arguments.max_failures));

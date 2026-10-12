@@ -19,6 +19,7 @@ ecb = { version = "0.2.1", features = ["alloc"] }
 env_logger = "0.11.11"
 futures = "0.3.34"
 jackerymon = { version = "0.1.0", path = "../jackerymon" }
+libc = "0.2.190"
 rand = "0.10.3"
 ratatui = "0.30.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "query", "rustls", "stream"] }

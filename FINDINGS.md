@@ -358,6 +358,17 @@ id found"); the poller survived.
 The host crash of 2026-10-11 09:50 was unrelated: the `xe` GPU driver
 failed to resume, a task hung on it, and suspend then failed.
 
+## Daemon socket and unit lock (2026-10-12)
+
+With the daemon on its Unix socket, `set` found it unprompted and
+applied a setting in 0.39 seconds; TCP answered `POST /settings` with
+404. A second daemon, a direct `poll`, and `set --direct` were refused
+by the unit lock. Naming another unit made `set` refuse the daemon. After
+`kill -9`, the leftover socket was ignored and the leftover BLE
+connection reused; a clean exit removed the socket. With a daemon from
+before the socket running, a direct `set` reused that daemon's live
+connection and then closed it, which the unit lock now prevents.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

@@ -23,6 +23,8 @@ use tokio::sync::oneshot;
 
 use crate::connection::ConnectionArgs;
 use crate::connection::KeyHome;
+use crate::daemon_client::DaemonClient;
+use crate::daemon_client::RouteArgs;
 
 /// Consecutive transport failures before giving up, as `poll` does.
 const MAX_FAILURES: NonZeroU32 = NonZeroU32::new(3).expect("nonzero");
@@ -32,6 +34,8 @@ const MINUTES_PER_HOUR: u32 = 60;
 pub(crate) struct SetArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
+    #[command(flatten)]
+    route: RouteArgs,
     /// Confirm turning emergency charging on, which Jackery reserves for
     /// emergencies.
     // Global so it may follow the setting: `set emergency-charge on --yes`.
@@ -183,7 +187,18 @@ pub(crate) async fn run(arguments: SetArgs) -> Result<()> {
     {
         bail!("{setting}: {warning}; pass --yes to confirm");
     }
-    let key_file = arguments.connection.key_file(KeyHome::User)?;
+    let unit = arguments.connection.named_unit()?;
+    if let Some(endpoint) = arguments.route.endpoint(unit.as_deref())? {
+        let (client, _) = DaemonClient::connect(&endpoint, unit.as_deref()).await?;
+        // Confirmation, if needed, was given above.
+        client
+            .post_setting(setting, arguments.yes)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        println!("ok: {setting}");
+        return Ok(());
+    }
+    let (key_file, _lock) = arguments.connection.claim(KeyHome::User)?;
     let config = arguments.connection.poll_config(Some(MAX_FAILURES));
     let adapter = ble::default_adapter().await?;
     let (sender, commands) = mpsc::channel(1);

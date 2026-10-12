@@ -14,6 +14,9 @@ use clap::Args;
 use jackerymon::key_file::KeyFile;
 use jackerymon::poll::PollConfig;
 
+use crate::runtime;
+use crate::runtime::UnitLock;
+
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 /// The daemon's key directory.
 const SYSTEM_KEY_DIRECTORY: &str = "/etc/jackerymon";
@@ -113,9 +116,28 @@ pub(crate) struct ConnectionArgs {
 }
 
 impl ConnectionArgs {
+    /// The unit named by `--unit` or `--key-file`, if either is given.
+    pub(crate) fn named_unit(&self) -> Result<Option<String>> {
+        if let Some(unit) = &self.unit {
+            return Ok(Some(unit.clone()));
+        }
+        match &self.key_file {
+            Some(path) => Ok(Some(KeyFile::load(path)?.serial.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    /// The chosen unit's key, with this process's lock on the unit, which
+    /// must be held while using its BLE connection.
+    pub(crate) fn claim(&self, home: KeyHome) -> Result<(KeyFile, UnitLock)> {
+        let key_file = self.key_file(home)?;
+        let lock = runtime::lock_unit(key_file.serial.as_str())?;
+        Ok((key_file, lock))
+    }
+
     /// The key for the chosen unit, looked up in `home` unless
     /// `--key-file` names one.
-    pub(crate) fn key_file(&self, home: KeyHome) -> Result<KeyFile> {
+    fn key_file(&self, home: KeyHome) -> Result<KeyFile> {
         let path = match &self.key_file {
             Some(path) => path.clone(),
             None => find_key(&home.directory()?, self.unit.as_deref())?,

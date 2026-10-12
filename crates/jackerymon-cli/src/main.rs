@@ -6,6 +6,7 @@ mod daemon_client;
 mod key;
 mod poll;
 mod record;
+mod runtime;
 mod scan;
 mod set;
 mod tui;

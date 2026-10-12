@@ -79,30 +79,44 @@ once the Rust key fetch matched it (it remains in git history).
 - **One program, subcommands.**  `crates/jackerymon` is the library
   (typed errors, no `anyhow`); `crates/jackerymon-cli` builds the single
   `jackerymon` binary: `poll`, `set`, `tui`, `daemon`.
-- **The unit takes one BLE connection.**  Whatever holds it, a direct
-  TUI or the daemon, locks out the phone app and other clients.
-- **TUI.**  It consumes updates, not BLE, so it connects directly or
-  follows a daemon (`--daemon URL`); it never starts or stops one.  `m`
-  opens one inline settings list: ←/→ cycles a value, Enter applies it,
-  the menu stays open.  The requested value stays on screen while it
-  applies.  Each sample is aged by its own timestamp, so an old one
-  replayed by a daemon does not look fresh.
-- **Daemon.**  Owns the connection and retries forever.  HTTP on
-  `127.0.0.1:9888` by default: `GET /metrics` (Prometheus), `GET
-  /status`, `GET /events` (server-sent events, current state first),
-  `POST /settings` (the unit's one-key body; answers once status confirms
-  it, within 60 s including queueing).  Optional `--log-dir` writes daily
+- **The unit takes one BLE connection, so one process holds it.**  Every
+  command that uses BLE takes `/run/lock/jackerymon-<serial>.lock`, one
+  file shared by all users and the system daemon (sticky directory,
+  opened without following symlinks; another user's lock is opened
+  read-only).  While the lock is free, a connection BlueZ still shows is a
+  dead process's leftover and safe to reuse and close.  The holder also
+  locks out the phone app.
+- **Clients find a running daemon.**  `tui` and `set` look for the named
+  unit's socket (from `--unit` or `--key-file`), or the only one running,
+  in the user's runtime directory and then `/run/jackerymon`, and check
+  the daemon's serial before sending anything.  `--direct` skips the
+  daemon; `--daemon` names one by URL or socket.  They never start or
+  stop a daemon.
+- **TUI.** It consumes updates, not BLE, so it connects directly or
+  follows a daemon. `m` opens one inline settings list: ←/→ cycles a
+  value, Enter applies it, the menu stays open. The requested value
+  stays on screen while it applies. Each sample is aged by its own
+  timestamp, so an old one replayed by a daemon does not look fresh.
+- **Daemon.**  Owns the connection and retries forever.  The full API is
+  on a Unix socket per unit, `<runtime directory>/jackerymon/<serial>.sock`:
+  `GET /metrics` (Prometheus), `GET /status`, `GET /events` (server-sent
+  events, current state first), `POST /settings` (the unit's one-key
+  body; answers once status confirms it, within 60 s including
+  queueing).  TCP, `127.0.0.1:9888` by default, serves the read-only
+  routes unless `--tcp-control`.  A daemon refuses to start while
+  another answers on its socket, and replaces a dead one's leftover.  Optional `--log-dir` writes daily
   JSON-lines files; pruning is left to tmpfiles or logrotate.  Readings
   older than 60 s are left out of `/metrics`.  When polling ends, by
   signal or fatal error, HTTP stops too and the daemon exits with the
   polling result, so a supervisor sees failures.
-- **Daemon access is unauthenticated, by the user's choice.**  Anyone who
-  can reach it can change settings: no token, peer, or `Host` check.
-  Accepted risks: DNS rebinding lets a web page in a browser on the
-  daemon's host reach it even on localhost, and binding beyond
-  localhost for a remote Prometheus exposes control too.  Browsers
-  cannot post JSON cross-origin without a preflight the daemon never
-  answers.
+- **Control goes over the socket; TCP is read-only by default.**  The
+  socket's directory decides who may control the unit: a user's daemon
+  is private; the system daemon's socket is open to every local user
+  until packaging brings groups.  TCP has no token, peer, or `Host`
+  check, so `--tcp-control` brings back the accepted risks: DNS
+  rebinding lets a web page on the daemon's host change settings, and a
+  remote listener exposes control.  Without it, TCP exposes telemetry
+  only.
 
 ## Next steps and open questions
 

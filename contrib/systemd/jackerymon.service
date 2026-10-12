@@ -11,12 +11,18 @@ User=jackerymon
 SupplementaryGroups=bluetooth
 ConfigurationDirectory=jackerymon
 LogsDirectory=jackerymon
+# The socket, /run/jackerymon/<serial>.sock.  Any local user may use it
+# for now; groups come with packaging.
+RuntimeDirectory=jackerymon
+RuntimeDirectoryMode=0755
 # Reads its key from /etc/jackerymon/<serial>.json.
 ExecStart=/usr/local/bin/jackerymon daemon --log-dir /var/log/jackerymon
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
+# The per-unit lock, shared with interactive commands.
+ReadWritePaths=/run/lock
 ProtectHome=true
 PrivateTmp=true
 

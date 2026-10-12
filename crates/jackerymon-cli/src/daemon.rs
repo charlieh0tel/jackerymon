@@ -1,8 +1,8 @@
 //! `jackerymon daemon`: own the BLE connection; serve status, metrics,
 //! live updates, and settings over HTTP; optionally log every sample.
 //!
-//! The control endpoint has no authentication, so the default bind is
-//! localhost.
+//! The full API is on a Unix socket, whose permissions decide who may
+//! use it.  TCP, for Prometheus, is read-only unless `--tcp-control`.
 
 mod http;
 mod log;
@@ -25,6 +25,7 @@ use clap::Args;
 use jackerymon::ble;
 use jackerymon::poll::ControlRequest;
 use tokio::net::TcpListener;
+use tokio::net::UnixListener;
 use tokio::signal::unix::SignalKind;
 use tokio::signal::unix::signal;
 use tokio::sync::broadcast;
@@ -36,6 +37,7 @@ use crate::connection::KeyHome;
 use crate::daemon::log::SampleLog;
 use crate::daemon::state::Snapshot;
 use crate::record::Update;
+use crate::runtime;
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:9888";
 /// Updates buffered per `/events` client before it starts missing some.
@@ -50,11 +52,19 @@ const COMMAND_BUFFER: usize = 8;
 pub(crate) struct DaemonArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
-    /// Address for the HTTP API.  It can switch outputs and has no
-    /// authentication; expose it beyond localhost only on a trusted
-    /// network.
+    /// TCP address for the read-only routes: metrics, status, events.
     #[arg(long, default_value = DEFAULT_LISTEN)]
     listen: SocketAddr,
+    /// Also accept settings over TCP.  TCP has no authentication; anyone
+    /// who can reach it, including web pages through DNS rebinding, can
+    /// switch outputs.
+    #[arg(long)]
+    tcp_control: bool,
+    /// Unix socket for the full API; default
+    /// `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock`, or systemd's runtime
+    /// directory.
+    #[arg(long)]
+    socket: Option<PathBuf>,
     /// Directory for daily `YYYY-MM-DD.jsonl` sample logs; none if unset.
     #[arg(long)]
     log_dir: Option<PathBuf>,
@@ -94,10 +104,15 @@ impl Shared {
 }
 
 pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
-    let key_file = arguments.connection.key_file(KeyHome::System)?;
+    let (key_file, _lock) = arguments.connection.claim(KeyHome::System)?;
     // A daemon keeps trying while the unit's radio is off.
     let config = arguments.connection.poll_config(None);
     let adapter = ble::default_adapter().await?;
+    let socket_path = match arguments.socket {
+        Some(path) => path,
+        None => runtime::daemon_path(key_file.serial.as_str())?,
+    };
+    let (socket, _claimed) = runtime::claim(&socket_path)?;
     let listener = TcpListener::bind(arguments.listen)
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;
@@ -149,16 +164,39 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
             .context("polling failed")
         }
     };
-    eprintln!("listening on http://{}", arguments.listen);
-    serve(shared, listener, poller).await
+    eprintln!(
+        "listening on {} and http://{} ({})",
+        socket_path.display(),
+        arguments.listen,
+        if arguments.tcp_control {
+            "read-write"
+        } else {
+            "read-only"
+        }
+    );
+    let listeners = Listeners {
+        socket,
+        tcp: listener,
+        tcp_control: arguments.tcp_control,
+    };
+    serve(shared, listeners, poller).await
 }
 
 /// Serves HTTP until `poller` ends, whether a signal stopped it or it
 /// failed, then returns its result.  Open `/events` streams are closed
 /// so shutdown does not wait on their clients.
+/// Where the daemon serves.
+struct Listeners {
+    /// The full API.
+    socket: UnixListener,
+    tcp: TcpListener,
+    /// Whether TCP also takes settings.
+    tcp_control: bool,
+}
+
 async fn serve(
     shared: Arc<Shared>,
-    listener: TcpListener,
+    listeners: Listeners,
     poller: impl Future<Output = Result<()>>,
 ) -> Result<()> {
     let polling = async {
@@ -166,12 +204,19 @@ async fn serve(
         shared.stopping.send_replace(true);
         polled
     };
-    let server = axum::serve(listener, http::router(Arc::clone(&shared)))
+    let socket = axum::serve(listeners.socket, http::router(Arc::clone(&shared), true))
         .with_graceful_shutdown(shared.stopped())
         .into_future();
-    let (polled, served) = tokio::join!(polling, server);
+    let tcp = axum::serve(
+        listeners.tcp,
+        http::router(Arc::clone(&shared), listeners.tcp_control),
+    )
+    .with_graceful_shutdown(shared.stopped())
+    .into_future();
+    let (polled, socket, tcp) = tokio::join!(polling, socket, tcp);
     polled?;
-    served.context("serving HTTP")
+    socket.context("serving the socket")?;
+    tcp.context("serving TCP")
 }
 
 /// Completes on SIGINT or SIGTERM.
@@ -186,39 +231,103 @@ async fn shutdown() {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     use anyhow::anyhow;
     use futures::StreamExt;
+    use reqwest::StatusCode;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
 
+    use super::Listeners;
     use super::Shared;
     use super::serve;
+    use crate::daemon_client::DaemonClient;
+    use crate::daemon_client::Endpoint;
+    use crate::daemon_client::SOCKET_BASE;
+    use crate::runtime;
 
     /// Long enough for a loaded machine; a hang never ends.
     const PROMPTLY: Duration = Duration::from_secs(10);
 
+    /// A socket path of its own for each test.
+    fn socket_path(test: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("jackerymon-daemon-{}-{test}", std::process::id()))
+            .join("123456789.sock")
+    }
+
     #[tokio::test]
-    async fn polling_failure_ends_serving_despite_an_events_client() {
+    async fn polling_failure_ends_serving_despite_events_clients() {
         let (shared, _requests) = Shared::new("123456789".to_owned());
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let url = format!("http://{}/events", listener.local_addr().expect("address"));
+        let path = socket_path("failure");
+        let (socket, claimed) = runtime::claim(&path).expect("socket");
+        let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let base = format!("http://{}", tcp.local_addr().expect("address"));
         let (fail, failed) = oneshot::channel::<()>();
-        let served = tokio::spawn(serve(shared, listener, async move {
+        let listeners = Listeners {
+            socket,
+            tcp,
+            tcp_control: false,
+        };
+        let served = tokio::spawn(serve(shared, listeners, async move {
             failed.await.ok();
             Err(anyhow!("bad key"))
         }));
-        let response = reqwest::get(&url).await.expect("events");
-        let mut events = response.bytes_stream();
+        let over_socket = reqwest::Client::builder()
+            .unix_socket(path.clone())
+            .build()
+            .expect("client");
+        let mut tcp_events = reqwest::get(format!("{base}/events"))
+            .await
+            .expect("events")
+            .bytes_stream();
+        let mut socket_events = over_socket
+            .get(format!("{SOCKET_BASE}/events"))
+            .send()
+            .await
+            .expect("events")
+            .bytes_stream();
+        let tcp_setting = reqwest::Client::new()
+            .post(format!("{base}/settings"))
+            .json(&serde_json::json!({"lm": 1}))
+            .send()
+            .await
+            .expect("post");
+        assert_eq!(
+            tcp_setting.status(),
+            StatusCode::NOT_FOUND,
+            "TCP is read-only"
+        );
+        let endpoint = Endpoint::Unix(path.clone());
+        assert!(
+            DaemonClient::connect(&endpoint, Some("123456789"))
+                .await
+                .is_ok()
+        );
+        let other = DaemonClient::connect(&endpoint, Some("987654321"))
+            .await
+            .err()
+            .expect("another unit's daemon is refused")
+            .to_string();
+        assert!(
+            other.contains("owns unit 123456789, not 987654321"),
+            "{other}"
+        );
         fail.send(()).expect("poller waiting");
         let result = timeout(PROMPTLY, served)
             .await
             .expect("serving ends")
             .expect("task");
         assert_eq!(result.expect_err("poll error").to_string(), "bad key");
-        let rest = timeout(PROMPTLY, events.next()).await.expect("stream ends");
-        assert!(rest.is_none_or(|chunk| chunk.is_err()));
+        for events in [&mut tcp_events, &mut socket_events] {
+            let rest = timeout(PROMPTLY, events.next()).await.expect("stream ends");
+            assert!(rest.is_none_or(|chunk| chunk.is_err()));
+        }
+        drop(claimed);
+        fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
     }
 }
