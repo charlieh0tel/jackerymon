@@ -8,8 +8,8 @@ and measurements belong in [FINDINGS.md](FINDINGS.md), not here.
 
 A Rust workspace for monitoring Jackery units over BLE: a library, a
 logging daemon, a TUI, and a Prometheus exporter.  The Explorer protocol
-was proven with a small Python PoC (`tools/jackery_key.py`), then ported;
-the PoC stays as a cross-check until dropped.
+was proven with a small Python PoC, then ported; the PoC was removed
+once the Rust key fetch matched it (it remains in git history).
 
 ## Decisions
 
@@ -28,7 +28,7 @@ the PoC stays as a cross-check until dropped.
 - **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
   interactive commands, `/etc/jackerymon/` for the daemon; `--unit
   SERIAL` chooses, and is optional when one key is present.  The file
-  format is the PoC's, so either writes keys the other reads.
+  format is the PoC's, so keys it wrote still load.
 - **Several units: one daemon per unit.**  Each instance owns one unit's
   connection and port; one adapter can hold several connections.  A
   systemd template (`jackerymon@<serial>`) comes with the always-on

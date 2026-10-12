@@ -119,7 +119,8 @@ Which path produced the 2026-10-04 key, `device/bluetoothKey` lookup or
 
 The Python PoC in `tools/jackery_key.py` uses Bleak to decode advertisements,
 then reproduces login and either key lookup or explicit Explorer binding.
-See README.md for uv commands and docs/protocol.md for wire details.
+See docs/protocol.md for wire details. (The PoC was removed on
+2026-10-12 after the Rust port matched it; git history keeps it.)
 Twenty-one offline tests pass. A live Bleak scan decoded the test unit as model
 12, battery 100, bind/reset counter 3, with a six-byte GUID. After the
 user completed login and a local key file appeared, the PoC successfully

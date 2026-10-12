@@ -172,7 +172,7 @@ requests carry the token in header `token`, not Authorization.
 - Explorer scan-to-bind uses `POST device/bind`, form fields `devId`
   (advertised serial), `guid`, `bindKey` (advertised counter), and
   `timezoneOffset` (local UTC offset in minutes). Its response model
-  includes `bluetoothKey`; the PoC requires explicit `--bind`.
+  includes `bluetoothKey`; `jackerymon key` binds only with `--bind`.
 - App headers include platform=2, app_version=2.4.2,
   app_version_code=101, Accept-Language, sys_version, model, network.
 
@@ -181,8 +181,8 @@ Sources: `LoginApi.java`, `vc/b.java`, `ce/d.java`, `ce/h.java`,
 `RequestServer.java`, `BluetoothScanDeviceActivity.java` in scratch sources.
 The user completed login and a key file was produced; that key was then
 validated with a live GATT status query. The specific bootstrap endpoint
-used was not captured in this session. The PoC saves only selected device
-metadata/key, not the password or account token.
+used was not recorded. Key files hold only selected device metadata and
+the key, never the password or account token.
 
 ### Frame format
 
@@ -205,13 +205,12 @@ its lower seven bits are a result code. For paginated responses, the
 one-byte body length is followed by two-byte big-endian page index and
 page count, then body (`ac/e.java`). Concatenate pages in index order
 before JSON decoding. Notification fragmentation and protocol pagination
-are separate layers. The PoC bounds total received bytes and rejects
+are separate layers. The decoder bounds total received bytes and rejects
 conflicting pages, invalid CRCs, and nonzero device result codes.
 
-BLE connection loss clears Bleak's service table. Notifications stop on
-disconnect, so the PoC does not call `stop_notify` during teardown. It
-detects disconnects while awaiting status and retries transport failures
-with fresh discovery, connection, and page assembly, up to three attempts.
+Notifications stop on disconnect, so teardown does not unsubscribe. The
+poller detects disconnects while awaiting status and retries transport
+failures with fresh discovery, connection, and page assembly.
 CRC/key/device-response errors are not retried. This recovered successfully
 from an observed disconnect; it does not establish the reason for the drop.
 
@@ -229,11 +228,11 @@ not measure key changes on Wi-Fi credential removal. Power-cycle/reset/
 unbinding behavior is untested.
 Obtaining the key without cloud bootstrap remains unresolved.
 
-The PoC's `StatusSession` owns one pending query and its decoder. It
-ignores notifications outside a pending request and rejects overlapping
-queries; disconnects fail the current query immediately.
+The poller has one pending query at a time, with its own decoder. It
+ignores notifications outside a pending request; disconnects fail the
+current query immediately.
 
-`--poll` keeps one GATT connection and notification subscription across
+Polling keeps one GATT connection and notification subscription across
 queries. It discards notifications outside pending requests and starts a
 fresh decoder per request. Queries run sequentially, with a configurable
 delay after each completed response. Timeouts close the connection before
