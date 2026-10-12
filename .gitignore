@@ -2,6 +2,4 @@ scratch/
 *~
 .venv/
 __pycache__/
-jackery-key*.json
-jackery-key.json
 /target/
