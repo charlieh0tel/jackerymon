@@ -120,9 +120,12 @@ fn lock_in(directory: &Path, serial: &str) -> Result<UnitLock> {
 /// A bound socket, removed when dropped.
 pub(crate) struct Claimed {
     path: PathBuf,
-    /// Device and inode of the socket bound, so a later daemon's socket
-    /// at the same path is left alone.
-    identity: (u64, u64),
+    /// Device, inode, and change time of the socket bound, so a later
+    /// daemon's socket at the same path is left alone.  The inode alone is
+    /// not enough: a filesystem may hand a deleted socket's inode to the
+    /// next one.  For one unit the lock already orders daemons; this
+    /// guards a `--socket` path shared by mistake.
+    identity: SocketIdentity,
 }
 
 impl Drop for Claimed {
@@ -133,9 +136,17 @@ impl Drop for Claimed {
     }
 }
 
-fn identity(path: &Path) -> Option<(u64, u64)> {
+/// Device, inode, and change time in seconds and nanoseconds.
+type SocketIdentity = (u64, u64, i64, i64);
+
+fn identity(path: &Path) -> Option<SocketIdentity> {
     let metadata = fs::symlink_metadata(path).ok()?;
-    Some((metadata.dev(), metadata.ino()))
+    Some((
+        metadata.dev(),
+        metadata.ino(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ))
 }
 
 /// Binds `path` for this daemon.  Fails if a live daemon answers there;
@@ -155,12 +166,22 @@ pub(crate) fn claim(path: &Path) -> Result<(UnixListener, Claimed)> {
     }
     let listener =
         UnixListener::bind(path).with_context(|| format!("listening on {}", path.display()))?;
+    // Permissions first: changing them moves the change time that the
+    // identity records.
+    let identity = fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))
+        .with_context(|| format!("setting permissions on {}", path.display()))
+        .and_then(|()| identity(path).context("reading the socket just bound"));
+    let identity = match identity {
+        Ok(identity) => identity,
+        Err(error) => {
+            fs::remove_file(path).ok();
+            return Err(error);
+        }
+    };
     let claimed = Claimed {
         path: path.to_owned(),
-        identity: identity(path).context("reading the socket just bound")?,
+        identity,
     };
-    fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))
-        .with_context(|| format!("setting permissions on {}", path.display()))?;
     Ok((listener, claimed))
 }
 
@@ -278,6 +299,9 @@ mod tests {
         fs::remove_dir_all(&directory).expect("cleanup");
     }
 
+    /// Longer than the coarsest file timestamp tick.
+    const TIMESTAMP_GRANULARITY: std::time::Duration = std::time::Duration::from_millis(50);
+
     #[tokio::test]
     async fn leaves_a_later_daemons_socket_alone() {
         let directory =
@@ -285,6 +309,8 @@ mod tests {
         let path = socket_path(&directory, "111");
         let (first_listener, first) = claim(&path).expect("first");
         drop(first_listener);
+        // File timestamps can be as coarse as a scheduler tick.
+        tokio::time::sleep(TIMESTAMP_GRANULARITY).await;
         // A dead daemon's file is reclaimed by the next one.
         let (_second_listener, second) = claim(&path).expect("second");
         drop(first);
