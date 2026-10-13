@@ -369,6 +369,19 @@ connection reused; a clean exit removed the socket. With a daemon from
 before the socket running, a direct `set` reused that daemon's live
 connection and then closed it, which the unit lock now prevents.
 
+## Reconnects and signal strength (2026-10-12)
+
+Ten minutes of `poll --max-failures 0` with the unit's RSSI at about
+-87 dBm gave 98 samples on 35 connections: 35 disconnects and 54
+`le-connection-abort-by-local` connect failures. Most connections
+carried one or two samples; recovery took 2.5 seconds when the first
+reconnect worked and up to 18 seconds after ten failed attempts, with
+failures spread through recovery rather than bunched after the
+disconnect. The same ten minutes with the unit beside the laptop gave
+115 samples on one connection, no failures, median query 218.9 ms
+(maximum 310.2 ms). The failures were signal strength, not reconnect
+timing, so retry delays stay as they are.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
