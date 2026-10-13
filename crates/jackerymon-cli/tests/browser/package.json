@@ -1,0 +1,14 @@
+{
+  "name": "jackerymon-web-browser-tests",
+  "private": true,
+  "description": "Browser tests for the jackerymon daemon's page: the strip, the charts, and the edges a live daemon cannot show on demand.",
+  "type": "module",
+  "scripts": {
+    "test": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
+    "install-browser": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "uplot": "1.6.32"
+  }
+}

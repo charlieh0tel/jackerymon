@@ -1,0 +1,43 @@
+name: web
+
+# The browser tests for the daemon's page, `make test-web`: the page
+# against a faked API, for a daemon going and coming back, a lost link,
+# stale data, and the other edges a live daemon cannot show on demand.
+#
+# Separate from ci.yml, which calls the shared Rust workflow, because
+# this needs Node and a browser.  Narrowed to the files that can change
+# what it tests.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/jackerymon-cli/src/daemon/web/**"
+      - "crates/jackerymon-cli/tests/browser/**"
+      - "Makefile"
+      - ".github/workflows/web.yml"
+  pull_request:
+    paths:
+      - "crates/jackerymon-cli/src/daemon/web/**"
+      - "crates/jackerymon-cli/tests/browser/**"
+      - "Makefile"
+      - ".github/workflows/web.yml"
+
+jobs:
+  pages:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/jackerymon-cli/tests/browser/package-lock.json
+      # Playwright's Chromium into the test directory, as `make web-deps`
+      # does, with the system libraries it needs on a bare runner.
+      - run: npm ci --no-fund --no-audit
+        working-directory: crates/jackerymon-cli/tests/browser
+      - run: PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium
+        working-directory: crates/jackerymon-cli/tests/browser
+      - run: make test-web

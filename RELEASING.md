@@ -6,8 +6,8 @@ publishes a GitHub Release (`.github/workflows/build-deb.yml`); a failed
 
 1. Bump `version` in both crates and the CLI's `jackerymon` dependency;
    `cargo update -w`.
-2. Check: `cargo fmt --check`, `cargo clippy --workspace --all-targets`,
-   `cargo test`, `cargo audit --ignore RUSTSEC-2023-0071` (see PLAN.md).
+2. Check: `make ci`, `make test-web` (once `make web-deps`),
+   `cargo audit --ignore RUSTSEC-2023-0071` (see PLAN.md).
 3. Merge through a PR; wait for CI.
 4. Test the PR's CI-built packages, not local ones (glibc and
    cargo-deb versions differ):

@@ -43,6 +43,8 @@ use super::EVENT_KEEP_ALIVE;
 use super::Shared;
 use super::log;
 use super::metrics;
+use super::web;
+use super::web::View;
 use crate::record::Update;
 
 /// How long `POST /settings` waits, including for room in the queue and
@@ -52,6 +54,9 @@ const SETTING_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Lines `/history` reads ahead of a slow client.
 const HISTORY_BUFFER: usize = 256;
+const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
+const CSS_CONTENT_TYPE: &str = "text/css; charset=utf-8";
+const JS_CONTENT_TYPE: &str = "text/javascript; charset=utf-8";
 /// One JSON value per line.
 const JSON_LINES_CONTENT_TYPE: &str = "application/x-ndjson";
 /// Prometheus text exposition format, version 0.0.4.
@@ -63,7 +68,17 @@ pub(super) fn router(shared: Arc<Shared>, control: bool) -> Router {
         .route("/metrics", get(metrics))
         .route("/status", get(status))
         .route("/events", get(events))
-        .route("/history", get(history));
+        .route("/history", get(history))
+        .route("/series", get(series))
+        .route("/", get(|| async { page(HTML_CONTENT_TYPE, web::INDEX) }))
+        .route(
+            "/style.css",
+            get(|| async { page(CSS_CONTENT_TYPE, web::STYLE) }),
+        )
+        .route(
+            "/common.js",
+            get(|| async { page(JS_CONTENT_TYPE, web::COMMON) }),
+        );
     let routes = if control {
         reads.route("/settings", post(settings))
     } else {
@@ -89,8 +104,56 @@ async fn status(State(shared): State<Arc<Shared>>) -> Json<Value> {
         "samples": snapshot.samples,
         "connections": snapshot.connections,
         "transport_failures": snapshot.transport_failures,
+        "version": env!("CARGO_PKG_VERSION"),
+        "view": snapshot.latest.as_ref().and_then(|latest| latest.status.as_ref()).map(View::from),
         "latest": snapshot.latest.map(|latest| latest.record),
     }))
+}
+
+/// A page or asset built into the binary.
+fn page(content_type: &'static str, body: &'static str) -> Response {
+    ([(CONTENT_TYPE, content_type)], body).into_response()
+}
+
+/// `GET /series` query parameters: RFC 3339 times and a bucket width in
+/// seconds.
+#[derive(Deserialize)]
+struct SeriesQuery {
+    since: String,
+    /// Now when absent.
+    until: Option<String>,
+    /// One sample's worth when absent.
+    every: Option<i64>,
+}
+
+/// Chart columns over a range, averaged per bucket; see [`web::series`].
+async fn series(State(shared): State<Arc<Shared>>, Query(query): Query<SeriesQuery>) -> Response {
+    let Some(directory) = shared.log_dir.clone() else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "no history: the daemon has no --log-dir",
+        );
+    };
+    let (since, until) = match time_range(&query.since, query.until.as_deref()) {
+        Ok(range) => range,
+        Err(message) => return error(StatusCode::BAD_REQUEST, &message),
+    };
+    let every = query.every.unwrap_or(1);
+    match task::spawn_blocking(move || web::series(&directory, since, until, every)).await {
+        Ok(Ok(series)) => Json(series).into_response(),
+        Ok(Err(failure)) => error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{failure:#}")),
+        Err(failure) => error(StatusCode::INTERNAL_SERVER_ERROR, &failure.to_string()),
+    }
+}
+
+/// `since` and `until` (now when absent) parsed as RFC 3339.
+fn time_range(since: &str, until: Option<&str>) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
+    let parse = |text: &str| {
+        DateTime::parse_from_rfc3339(text)
+            .map(|time| time.with_timezone(&Utc))
+            .map_err(|_| format!("{text:?} is not an RFC 3339 time"))
+    };
+    Ok((parse(since)?, until.map_or_else(|| Ok(Utc::now()), parse)?))
 }
 
 /// Server-sent events, one [`Update`] each as JSON: first the current
@@ -132,19 +195,7 @@ async fn history(State(shared): State<Arc<Shared>>, Query(query): Query<HistoryQ
             "no history: the daemon has no --log-dir",
         );
     };
-    let parse = |text: &str| {
-        DateTime::parse_from_rfc3339(text)
-            .map(|time| time.with_timezone(&Utc))
-            .map_err(|_| format!("{text:?} is not an RFC 3339 time"))
-    };
-    let range = parse(&query.since).and_then(|since| {
-        let until = query
-            .until
-            .as_deref()
-            .map_or_else(|| Ok(Utc::now()), parse)?;
-        Ok((since, until))
-    });
-    let (since, until) = match range {
+    let (since, until) = match time_range(&query.since, query.until.as_deref()) {
         Ok(range) => range,
         Err(message) => return error(StatusCode::BAD_REQUEST, &message),
     };

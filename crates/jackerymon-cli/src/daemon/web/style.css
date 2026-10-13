@@ -1,0 +1,57 @@
+/* The look of smartclock-web, so the fleet's pages read alike. */
+:root {
+  color-scheme: dark;
+  --bg: #14161a; --panel: #1d2026; --line: #2b3038;
+  --text: #e6e8eb; --dim: #8b929c;
+  --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --accent: #38bdf8;
+  --font: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+/* minmax(0, ...), not 1fr, whose minimum is its content: a wide line
+   inside a panel would otherwise widen the page instead of scrolling. */
+body {
+  margin: 0; padding: 12px; gap: 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  background: var(--bg); color: var(--text);
+  font: 13px/1.5 var(--font);
+}
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim);
+     text-transform: uppercase; letter-spacing: .08em; }
+.controls h2 { margin: 0; }
+
+/* Status strip: the few things worth seeing before anything else. */
+#status { display: flex; flex-wrap: wrap; gap: 10px 26px; align-items: baseline; }
+/* A fixed column, so a reading that gets wider does not shove every
+   tile after it sideways. */
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 10ch; }
+.stat .v { font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat .k { font-size: 11px; color: var(--dim); }
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+#age { min-width: 14ch; }
+.live { background: #14532d; color: var(--ok); }
+.stale { background: #422006; color: var(--warn); }
+.down { background: #450a0a; color: var(--bad); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
+button {
+  background: #262b33; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer;
+}
+button:hover { border-color: #3d4452; }
+button[aria-pressed="true"] { background: var(--accent); color: #07121a; border-color: var(--accent); }
+.grow { flex: 1; }
+
+table { border-collapse: collapse; font-size: 12px; }
+th { text-align: left; color: var(--dim); font-weight: 500; padding: 2px 16px 2px 0; }
+td { padding: 2px 6px 2px 0; font-variant-numeric: tabular-nums; }
+.muted { color: var(--dim); }
+#note { color: var(--warn); }
+footer { grid-column: 1 / -1; color: var(--dim); font-size: 11px; }
+footer a { color: var(--dim); }
+
+.uplot { width: 100% !important; }
+/* Left, where the eye starts, and where the y axis label already is. */
+.u-title { text-align: left; padding-left: 2px; }
+#charts > div + div { margin-top: 8px; }

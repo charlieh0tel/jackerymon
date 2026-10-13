@@ -86,6 +86,8 @@ Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
 | `GET /metrics` | Prometheus `jackery_*` metrics | yes |
 | `GET /events` | server-sent events: current state, then changes | yes |
 | `GET /history?since=…&until=…` | logged samples, JSON lines; needs `--log-dir` | yes |
+| `GET /series?since=…&every=…` | chart columns, averaged per interval; needs `--log-dir` | yes |
+| `GET /` | the web view: live status, power and battery charts, settings | yes |
 | `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | only with `--tcp-control` |
 
 ```sh

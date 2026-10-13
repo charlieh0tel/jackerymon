@@ -112,6 +112,17 @@ once the Rust key fetch matched it (it remains in git history).
   older than 60 s are left out of `/metrics`.  When polling ends, by
   signal or fatal error, HTTP stops too and the daemon exits with the
   polling result, so a supervisor sees failures.
+- **Web view, after smartclock-web.**  The daemon serves one page at
+  `/` over TCP, read-only: a status strip polled every second, power and
+  battery charts over 10 min to 7 d, and the unit's settings.  Same
+  look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
+  smartclock-web; served by the daemon rather than a separate process,
+  since one daemon owns one unit.  `/series` averages samples into
+  intervals of at most 5,000 points; `/status` carries the reading
+  worded as the TUI words it (`text.rs`).  Playwright tests fake the API
+  per test; because the daemon needs a key and an adapter to start, they
+  serve the page's files from the tree, and a Rust test checks the
+  daemon serves the same paths.
 - **Control goes over the socket; TCP is read-only by default.**  The
   socket is mode 0660 and its directory decides the rest: a user's
   daemon is private; the system daemon's admits the `jackerymon` group.

@@ -1,0 +1,177 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jackery</title>
+
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css"
+      integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE"
+      crossorigin="anonymous">
+
+<link rel="stylesheet" href="/style.css">
+
+<div class="panel" id="status"><span class="muted">connecting...</span></div>
+
+<div class="panel">
+  <div class="controls">
+    <h2>History</h2>
+    <span class="grow"></span>
+    <span id="ranges"></span>
+  </div>
+  <div id="charts"></div>
+  <div id="note"></div>
+</div>
+
+<div class="panel">
+  <h2>Unit</h2>
+  <table id="unit"><tr><td class="muted">waiting...</td></tr></table>
+</div>
+
+<footer id="colophon"></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"
+        integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c"
+        crossorigin="anonymous"></script>
+<script src="/common.js"></script>
+<script>
+"use strict";
+
+// The chart library comes from a CDN; without it the strip and the unit
+// table still work, and the chart panel says why it is empty.
+const haveUplot = typeof uPlot !== "undefined";
+// Input and output in the TUI's colors; battery in the accent.
+const INPUT = "#4ade80";
+const OUTPUT = "#fbbf24";
+const BATTERY = "#38bdf8";
+const TEMPERATURE = "#f87171";
+// About this many points per chart, whatever the window.
+const POINTS = 1500;
+// How often a window ending now is read again.
+const CHART_EVERY = 30000;
+const CHART_HEIGHT = 220;
+// Hovering one chart moves the cursor on the other.
+const SYNC = haveUplot ? uPlot.sync("jackerymon") : null;
+
+let range = readRange();
+let charts = [];
+
+function clearCharts(why, bad = false) {
+  for (const c of charts) c.destroy();
+  charts = [];
+  $("charts").innerHTML = "";
+  $("note").textContent = bad ? why : "";
+  if (!bad) $("charts").innerHTML = `<span class="muted">${esc(why)}</span>`;
+}
+
+function chart(title, data, series, axes) {
+  const el = document.createElement("div");
+  $("charts").appendChild(el);
+  return new uPlot(
+    {
+      title,
+      width: $("charts").clientWidth || 800,
+      height: CHART_HEIGHT,
+      cursor: { sync: { key: SYNC.key } },
+      series: [{}, ...series],
+      axes: [{ stroke: "#8b929c", grid: { stroke: "#2b3038" } }, ...axes],
+      scales: { x: { time: true } },
+    },
+    data,
+    el,
+  );
+}
+
+const yAxis = (label, scale, side = 3) => ({
+  label, scale, side, stroke: "#8b929c", grid: { stroke: "#2b3038", show: side === 3 },
+});
+
+async function load(signal) {
+  if (!haveUplot) {
+    clearCharts("the chart library could not be loaded from cdn.jsdelivr.net; the readings above still update", true);
+    return;
+  }
+  const until = new Date();
+  const since = new Date(until.getTime() - range * 1000);
+  const every = Math.max(1, Math.round(range / POINTS));
+  const q = new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), every });
+  const s = await ask(`/series?${q}`, signal);
+  if (!s.time.length) {
+    clearCharts("no samples logged in this window");
+    return;
+  }
+  clearCharts("");
+  charts = [
+    chart(
+      "Power",
+      [s.time, s.input_watts, s.output_watts],
+      [
+        { label: "input W", stroke: INPUT, scale: "W" },
+        { label: "output W", stroke: OUTPUT, scale: "W" },
+      ],
+      [yAxis("W", "W")],
+    ),
+    chart(
+      "Battery",
+      [s.time, s.battery_percent, s.battery_celsius],
+      [
+        { label: "charge %", stroke: BATTERY, scale: "%" },
+        { label: "temperature °C", stroke: TEMPERATURE, scale: "°C" },
+      ],
+      [yAxis("%", "%"), yAxis("°C", "°C", 1)],
+    ),
+  ];
+}
+
+// The unit's settings and inputs as the strip last read them; nothing
+// here can be changed from the page.
+function unitTable(s) {
+  if (!s?.view) {
+    $("unit").innerHTML = `<tr><td class="muted">${s ? "no reading yet" : "no daemon"}</td></tr>`;
+    return;
+  }
+  const v = s.view;
+  const acOut = v.ac_output === "on" && v.ac_output_volts != null
+    ? `on, ${fmt(v.ac_output_volts, 1)} V ${fmt(v.ac_output_hertz)} Hz`
+    : v.ac_output;
+  const rows = [
+    ["AC output", acOut],
+    ["DC output", v.dc_output],
+    ["USB output", v.usb_output],
+    ["car output", v.car_output],
+    ["AC input", unitText(v.ac_input_watts, "W")],
+    ["car input", unitText(v.car_input_watts, "W")],
+    ["solar input", unitText(v.solar_input_watts, "W", 1)],
+    ["light", v.light],
+    ["screen", v.screen],
+    ["auto-off", v.auto_off],
+    ["energy saving", v.energy_saving],
+    ["charge speed", v.charge_speed],
+    ["battery protection", v.battery_protection],
+    ["emergency charge", v.emergency_charge],
+    ["UPS", v.ups],
+    ["fault", v.fault],
+  ];
+  // A field the unit does not report is left out, not shown as "--".
+  $("unit").innerHTML = rows
+    .filter(([, value]) => value !== null && value !== undefined && value !== MISSING)
+    .map(([k, value]) => `<tr><th>${esc(k)}</th><td>${esc(value)}</td></tr>`)
+    .join("");
+}
+
+rangeControl($("ranges"), range, (last) => {
+  range = last;
+  renew();
+});
+// Charts follow the window's width.
+addEventListener("resize", () => {
+  for (const c of charts) c.setSize({ width: $("charts").clientWidth, height: CHART_HEIGHT });
+});
+
+content({
+  load,
+  clear: clearCharts,
+  every: CHART_EVERY,
+  auto: () => true,
+  status: unitTable,
+});
+</script>

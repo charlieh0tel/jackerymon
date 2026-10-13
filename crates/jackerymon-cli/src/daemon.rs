@@ -8,6 +8,7 @@ mod http;
 pub(crate) mod log;
 mod metrics;
 mod state;
+mod web;
 
 use std::future::Future;
 use std::future::IntoFuture;
@@ -497,6 +498,28 @@ mod tests {
             assert_eq!(response.status(), expected, "{query}");
             if expected == StatusCode::OK {
                 assert_eq!(response.text().await.expect("body"), format!("{line}\n"));
+                // The page and its chart data come from the same server.
+                for (path, kind) in [
+                    ("/", "text/html"),
+                    ("/style.css", "text/css"),
+                    ("/common.js", "text/javascript"),
+                ] {
+                    let page = reqwest::get(format!("{base}{path}")).await.expect("page");
+                    let content_type = page.headers()[reqwest::header::CONTENT_TYPE]
+                        .to_str()
+                        .expect("type")
+                        .to_owned();
+                    assert!(content_type.starts_with(kind), "{path}: {content_type}");
+                }
+                let series: serde_json::Value =
+                    reqwest::get(format!("{base}/series?{query}&every=60"))
+                        .await
+                        .expect("series")
+                        .json()
+                        .await
+                        .expect("json");
+                assert_eq!(series["time"].as_array().map(Vec::len), Some(1));
+                assert_eq!(series["every"], 60);
             }
             stop.send(()).expect("stop");
             served.await.expect("task").expect("served");
