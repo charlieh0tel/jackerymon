@@ -105,6 +105,9 @@ pub(crate) trait Connector {
     type Link: Link;
 
     async fn connect(&mut self, timeout: Duration) -> Result<Self::Link, BleError>;
+
+    /// Closes whatever a `connect` cancelled partway may have left open.
+    async fn abandon(&mut self, timeout: Duration);
 }
 
 /// One open connection to the unit.
@@ -179,8 +182,12 @@ async fn poll_loop<C: Connector>(
     let mut counters = Counters::default();
     loop {
         let connected = tokio::select! {
-            () = &mut stop => return Ok(()),
-            connected = connector.connect(config.timeout) => connected,
+            () = &mut stop => None,
+            connected = connector.connect(config.timeout) => Some(connected),
+        };
+        let Some(connected) = connected else {
+            connector.abandon(config.timeout).await;
+            return Ok(());
         };
         let error = match connected {
             Ok(mut link) => {
@@ -408,15 +415,19 @@ mod tests {
         BadData,
         /// Query succeeds, then the unit disconnects while idle.
         StatusThenDrop(i64),
+        /// Connecting never finishes.
+        ConnectHangs,
     }
 
-    /// Shared script, actions sent, and a count of closed links.
+    /// Shared script, actions sent, and counts of closed links and
+    /// abandoned connects.
     #[derive(Clone, Default)]
     struct Script {
         steps: Rc<RefCell<VecDeque<Step>>>,
         actions: Rc<RefCell<Vec<u8>>>,
         connects: Rc<RefCell<u32>>,
         closed: Rc<RefCell<u32>>,
+        abandoned: Rc<RefCell<u32>>,
     }
 
     struct FakeLink {
@@ -429,6 +440,9 @@ mod tests {
 
         async fn connect(&mut self, _timeout: Duration) -> Result<FakeLink, BleError> {
             *self.connects.borrow_mut() += 1;
+            if matches!(self.steps.borrow().front(), Some(Step::ConnectHangs)) {
+                return std::future::pending().await;
+            }
             let mut steps = self.steps.borrow_mut();
             if matches!(steps.front(), Some(Step::ConnectFails)) {
                 steps.pop_front();
@@ -438,6 +452,10 @@ mod tests {
                 script: self.clone(),
                 drop_while_idle: false,
             })
+        }
+
+        async fn abandon(&mut self, _timeout: Duration) {
+            *self.abandoned.borrow_mut() += 1;
         }
     }
 
@@ -465,7 +483,7 @@ mod tests {
                 }
                 Some(Step::QueryFails) => Err(BleError::Disconnected),
                 Some(Step::BadData) => Err(BleError::Decode(DecodeError::InvalidChecksum)),
-                Some(Step::ConnectFails) | None => pending().await,
+                Some(Step::ConnectFails | Step::ConnectHangs) | None => pending().await,
             }
         }
 
@@ -596,6 +614,23 @@ mod tests {
         .await;
         assert!(result.is_ok());
         assert_eq!(*script.closed.borrow(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_while_connecting_abandons_the_attempt() {
+        let script = Script::default();
+        script.steps.borrow_mut().push_back(Step::ConnectHangs);
+        let result = poll_with(
+            script.clone(),
+            config(),
+            None,
+            tokio::time::sleep(Duration::from_secs(1)),
+            |_| ControlFlow::Continue(()),
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(*script.abandoned.borrow(), 1);
+        assert_eq!(*script.closed.borrow(), 0);
     }
 
     #[tokio::test(start_paused = true)]

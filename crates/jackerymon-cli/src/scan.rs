@@ -37,13 +37,7 @@ pub(crate) async fn run(arguments: ScanArgs) -> Result<()> {
 /// fails if there are none.
 pub(crate) async fn find(timeout: f64, address: Option<&str>) -> Result<Vec<Sighting>> {
     let adapter = ble::default_adapter().await?;
-    let sightings: Vec<Sighting> = ble::scan(&adapter, Duration::from_secs_f64(timeout))
-        .await?
-        .into_iter()
-        .filter(|sighting| {
-            address.is_none_or(|address| sighting.address.eq_ignore_ascii_case(address))
-        })
-        .collect();
+    let sightings = ble::scan(&adapter, Duration::from_secs_f64(timeout), address).await?;
     if sightings.is_empty() {
         bail!("no Jackery unit heard; wake it and retry");
     }

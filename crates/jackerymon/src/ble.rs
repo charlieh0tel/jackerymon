@@ -24,7 +24,9 @@ use bluer::gatt::remote::Characteristic;
 use bluer::gatt::remote::CharacteristicWriteRequest;
 use futures::Stream;
 use futures::StreamExt;
+use log::debug;
 use log::info;
+use log::warn;
 use thiserror::Error;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -134,17 +136,29 @@ pub struct Sighting {
 }
 
 /// Listens for `duration` and returns every Jackery power station heard,
-/// one entry per address.  No connection is made.
+/// or only the one at `only`, one entry per address.  No connection is
+/// made.
 ///
 /// # Errors
 ///
-/// Fails if BlueZ cannot scan.
-pub async fn scan(adapter: &Adapter, duration: Duration) -> Result<Vec<Sighting>, BleError> {
+/// Fails if BlueZ cannot scan or `only` is not an address.
+pub async fn scan(
+    adapter: &Adapter,
+    duration: Duration,
+    only: Option<&str>,
+) -> Result<Vec<Sighting>, BleError> {
+    let only: Option<Address> = only
+        .map(|text| {
+            text.parse()
+                .map_err(|_| BleError::InvalidAddress(text.to_owned()))
+        })
+        .transpose()?;
     adapter
         .set_discovery_filter(DiscoveryFilter {
             transport: DiscoveryTransport::Le,
             duplicate_data: true,
             uuids: HashSet::from([SERVICE]),
+            pattern: only.map(|address| address.to_string()),
             ..DiscoveryFilter::default()
         })
         .await?;
@@ -153,10 +167,20 @@ pub async fn scan(adapter: &Adapter, duration: Duration) -> Result<Vec<Sighting>
     let mut discovery = Box::pin(adapter.discover_devices_with_changes().await?);
     let listening = async {
         while let Some(event) = discovery.next().await {
-            if let AdapterEvent::DeviceAdded(address) = event
-                && let Some(advertisement) = heard(&adapter.device(address)?).await?
-            {
-                heard_by_address.insert(address, advertisement);
+            let AdapterEvent::DeviceAdded(address) = event else {
+                continue;
+            };
+            if only.is_some_and(|only| only != address) {
+                continue;
+            }
+            // A device can vanish between being listed and being read;
+            // that ends its entry, not the scan.
+            match heard(&adapter.device(address)?).await {
+                Ok(Some(advertisement)) => {
+                    heard_by_address.insert(address, advertisement);
+                }
+                Ok(None) => {}
+                Err(error) => debug!("skipping {address}: {error}"),
             }
         }
         Ok::<(), BleError>(())
@@ -188,16 +212,29 @@ impl Unit {
     /// address; BlueZ keeps one object per address, so if one of those
     /// registers first, every real advertisement is refused until the
     /// object goes (see `FINDINGS.md`, Duplicate advertisement).
-    async fn clear_impostor(&self) -> Result<(), BleError> {
+    ///
+    /// Only an object matching that signature goes: random type, not
+    /// paired or trusted, and carrying no advertisement data, so a wrong
+    /// `--address` cannot delete another device's pairing.
+    async fn clear_impostor(&self, limit: Duration) -> Result<(), BleError> {
         let device = self.adapter.device(self.address)?;
         // An error here means there is no object, which is fine.
-        if device.address_type().await.ok() == Some(AddressType::LeRandom) {
-            self.adapter.remove_device(self.address).await?;
-            info!(
-                "removed BlueZ's random-type object for {}, left by the unit's empty duplicate advertisement",
-                self.address
-            );
+        if !bounded(limit, "inspecting the unit's object", is_impostor(&device))
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
         }
+        bounded(
+            limit,
+            "removing the stale object",
+            self.adapter.remove_device(self.address),
+        )
+        .await?;
+        info!(
+            "removed BlueZ's random-type object for {}, left by the unit's empty duplicate advertisement",
+            self.address
+        );
         Ok(())
     }
 
@@ -232,17 +269,21 @@ impl Unit {
         let events = Box::pin(device.events().await?);
         bounded(limit, "connecting", device.connect()).await?;
         let services = bounded(limit, "discovering services", device.services()).await?;
-        let mut command = None;
-        let mut notify = None;
-        for service in services {
-            for characteristic in service.characteristics().await? {
-                match characteristic.uuid().await? {
-                    COMMAND => command = Some(characteristic),
-                    NOTIFY => notify = Some(characteristic),
-                    _ => {}
+        let (command, notify) = bounded(limit, "discovering characteristics", async {
+            let mut command = None;
+            let mut notify = None;
+            for service in services {
+                for characteristic in service.characteristics().await? {
+                    match characteristic.uuid().await? {
+                        COMMAND => command = Some(characteristic),
+                        NOTIFY => notify = Some(characteristic),
+                        _ => {}
+                    }
                 }
             }
-        }
+            Ok((command, notify))
+        })
+        .await?;
         let command = command.ok_or(BleError::MissingCharacteristic(COMMAND))?;
         let notify = notify.ok_or(BleError::MissingCharacteristic(NOTIFY))?;
         let notifications = Box::pin(bounded(limit, "subscribing", notify.notify()).await?);
@@ -252,6 +293,7 @@ impl Unit {
             notifications,
             events,
             key: self.key_file.key.clone(),
+            limit,
         })
     }
 
@@ -264,7 +306,7 @@ impl Unit {
             Ok(connection) => Ok(connection),
             Err(error) => {
                 // The setup error matters more than a failed cleanup.
-                device.disconnect().await.ok();
+                disconnect(device, limit).await;
                 Err(error)
             }
         }
@@ -282,7 +324,7 @@ impl Connector for Unit {
             info!("reusing the open BlueZ connection to {}", self.address);
             return self.open_or_disconnect(&device, limit).await;
         }
-        self.clear_impostor().await?;
+        self.clear_impostor(limit).await?;
         // Only objects for addresses starting with the unit's are created,
         // which keeps other devices' advertisements out of BlueZ.
         self.adapter
@@ -301,6 +343,14 @@ impl Connector for Unit {
         let device = found.map_err(|_| BleError::NotFound)??;
         self.open_or_disconnect(&device, limit).await
     }
+
+    async fn abandon(&mut self, limit: Duration) {
+        if let Ok(device) = self.adapter.device(self.address)
+            && device.is_connected().await.unwrap_or(false)
+        {
+            disconnect(&device, limit).await;
+        }
+    }
 }
 
 /// One connection with its notification subscription.
@@ -311,6 +361,8 @@ struct Connection {
     /// The device's property changes, watched for a disconnect.
     events: DeviceEvents,
     key: BleKey,
+    /// Bound on the disconnect at close.
+    limit: Duration,
 }
 
 impl Link for Connection {
@@ -325,9 +377,13 @@ impl Link for Connection {
             op_type: WriteOp::Command,
             ..CharacteristicWriteRequest::default()
         };
-        self.command
-            .write_ext(&request.encode(&self.key, mask), &write)
-            .await?;
+        bounded(
+            limit,
+            "writing the request",
+            self.command
+                .write_ext(&request.encode(&self.key, mask), &write),
+        )
+        .await?;
         let outcome = timeout(limit, async {
             loop {
                 tokio::select! {
@@ -377,9 +433,8 @@ impl Link for Connection {
     }
 
     async fn close(self) {
-        // Disconnect stops notifications, so there is no unsubscribe.  An
-        // error here means the link is already gone.
-        self.device.disconnect().await.ok();
+        // Disconnect stops notifications, so there is no unsubscribe.
+        disconnect(&self.device, self.limit).await;
     }
 }
 
@@ -402,6 +457,32 @@ async fn heard(device: &Device) -> Result<Option<Advertisement>, BleError> {
         .iter()
         .map(|(company, value)| (*company, value.as_slice()));
     Ok(advertisement::decode(manufacturer, service_data))
+}
+
+/// Whether `device` looks like the unit's empty random-type duplicate.
+async fn is_impostor(device: &Device) -> bluer::Result<bool> {
+    Ok(device.address_type().await? == AddressType::LeRandom
+        && !device.is_paired().await?
+        && !device.is_trusted().await?
+        && device
+            .service_data()
+            .await?
+            .is_none_or(|data| data.is_empty())
+        && device
+            .manufacturer_data()
+            .await?
+            .is_none_or(|data| data.is_empty()))
+}
+
+/// Disconnects within `limit`.  A device already gone is fine; any other
+/// failure is logged, since the unit may stay connected and unreachable.
+async fn disconnect(device: &Device, limit: Duration) {
+    if !device.is_connected().await.unwrap_or(false) {
+        return;
+    }
+    if let Err(error) = bounded(limit, "disconnecting", device.disconnect()).await {
+        warn!("disconnecting {}: {error}", device.address());
+    }
 }
 
 /// A disconnect, or the end of the device's events (it was removed).
