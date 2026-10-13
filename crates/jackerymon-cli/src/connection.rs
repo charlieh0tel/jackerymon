@@ -18,6 +18,10 @@ use crate::runtime;
 use crate::runtime::UnitLock;
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+/// Seconds allowed for discovery, connection, and each query.
+const DEFAULT_TIMEOUT: &str = "10";
+/// Seconds between a response and the next request.
+const DEFAULT_INTERVAL: &str = "5";
 /// The daemon's key directory.
 const SYSTEM_KEY_DIRECTORY: &str = "/etc/jackerymon";
 /// Under `$XDG_CONFIG_HOME`, or `~/.config` without it.
@@ -108,11 +112,11 @@ pub(crate) struct ConnectionArgs {
     #[arg(long, global = true)]
     address: Option<String>,
     /// Seconds allowed for discovery, connection, and each query.
-    #[arg(long, global = true, default_value_t = 10.0, value_parser = positive_seconds)]
-    timeout: f64,
+    #[arg(long, global = true, default_value = DEFAULT_TIMEOUT, value_parser = seconds)]
+    timeout: Duration,
     /// Seconds between a response and the next request.
-    #[arg(long, global = true, default_value_t = 5.0, value_parser = positive_seconds)]
-    interval: f64,
+    #[arg(long, global = true, default_value = DEFAULT_INTERVAL, value_parser = seconds)]
+    interval: Duration,
 }
 
 impl ConnectionArgs {
@@ -151,18 +155,22 @@ impl ConnectionArgs {
 
     pub(crate) fn poll_config(&self, max_consecutive_failures: Option<NonZeroU32>) -> PollConfig {
         PollConfig {
-            timeout: Duration::from_secs_f64(self.timeout),
-            interval: Duration::from_secs_f64(self.interval),
+            timeout: self.timeout,
+            interval: self.interval,
             reconnect_delay: RECONNECT_DELAY,
             max_consecutive_failures,
         }
     }
 }
 
-pub(crate) fn positive_seconds(text: &str) -> Result<f64, String> {
-    match text.parse::<f64>() {
-        Ok(seconds) if seconds.is_finite() && seconds > 0.0 => Ok(seconds),
-        _ => Err("must be a positive number of seconds".to_owned()),
+/// A positive number of seconds that fits a `Duration` and does not round
+/// to zero.
+pub(crate) fn seconds(text: &str) -> Result<Duration, String> {
+    let invalid = || "must be a positive number of seconds".to_owned();
+    let seconds: f64 = text.parse().map_err(|_| invalid())?;
+    match Duration::try_from_secs_f64(seconds) {
+        Ok(duration) if !duration.is_zero() => Ok(duration),
+        _ => Err(invalid()),
     }
 }
 
@@ -172,6 +180,7 @@ mod tests {
 
     use super::find_key;
     use super::key_path;
+    use super::seconds;
 
     #[test]
     fn finds_the_only_key_or_asks_for_a_unit() {
@@ -193,5 +202,13 @@ mod tests {
         );
         fs::remove_dir_all(&directory).expect("cleanup");
         assert!(several.contains("111, 222"), "{several}");
+    }
+
+    #[test]
+    fn seconds_must_be_positive_and_representable() {
+        assert_eq!(seconds("2.5"), Ok(std::time::Duration::from_millis(2500)));
+        for bad in ["0", "-1", "nan", "inf", "1e100", "1e-12", "ten"] {
+            assert!(seconds(bad).is_err(), "{bad}");
+        }
     }
 }

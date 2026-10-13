@@ -74,7 +74,7 @@ pub(crate) struct DaemonArgs {
 }
 
 /// What the poller and HTTP handlers share.
-pub(crate) struct Shared {
+struct Shared {
     snapshot: Mutex<Snapshot>,
     updates: broadcast::Sender<Update>,
     commands: mpsc::Sender<ControlRequest>,

@@ -4,6 +4,7 @@
 //! The account password and the session token are never printed or
 //! saved; the key is written only to the key file.
 
+use std::fs;
 use std::fs::DirBuilder;
 use std::fs::OpenOptions;
 use std::io;
@@ -42,10 +43,10 @@ use serde_json::Value;
 
 use crate::connection::KeyHome;
 use crate::connection::key_path;
-use crate::connection::positive_seconds;
+use crate::connection::seconds;
 use crate::record::UnitRecord;
 use crate::scan;
-use crate::scan::DEFAULT_LISTEN_SECONDS;
+use crate::scan::DEFAULT_LISTEN;
 
 const API: &str = "https://iot.jackeryapp.com/v1/";
 /// The app's RSA key for wrapping the login's AES key (SPKI DER, base64).
@@ -70,6 +71,8 @@ const APP_ID: &str = "com.hbxn.jackery";
 const SECONDS_PER_MINUTE: i32 = 60;
 const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
 const PRIVATE_FILE_MODE: u32 = 0o600;
+/// Extension of the key file while it is written, before the process id.
+const TEMPORARY_EXTENSION: &str = "partial-";
 
 #[derive(Args)]
 pub(crate) struct KeyArgs {
@@ -77,8 +80,8 @@ pub(crate) struct KeyArgs {
     #[arg(long)]
     address: Option<String>,
     /// Seconds to listen for the unit.
-    #[arg(long, default_value_t = DEFAULT_LISTEN_SECONDS, value_parser = positive_seconds)]
-    timeout: f64,
+    #[arg(long, default_value = DEFAULT_LISTEN, value_parser = seconds)]
+    timeout: Duration,
     /// Jackery account email; prompted if absent.
     #[arg(long)]
     account: Option<String>,
@@ -184,8 +187,19 @@ struct Fetched {
 }
 
 /// Creates `path` with owner-only permissions; never replaces a file or
-/// follows a symlink.
+/// follows a symlink.  The key is written to a temporary file and linked
+/// into place complete, so a failure leaves no partial key behind.
 fn save(path: &Path, record: &KeyRecord) -> Result<()> {
+    let temporary = path.with_extension(format!("{TEMPORARY_EXTENSION}{}", std::process::id()));
+    let written = write_new(&temporary, record).and_then(|()| {
+        // Linking fails if `path` exists, unlike renaming.
+        fs::hard_link(&temporary, path).with_context(|| format!("creating {}", path.display()))
+    });
+    fs::remove_file(&temporary).ok();
+    written
+}
+
+fn write_new(path: &Path, record: &KeyRecord) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -193,7 +207,9 @@ fn save(path: &Path, record: &KeyRecord) -> Result<()> {
         .open(path)
         .with_context(|| format!("creating {}", path.display()))?;
     let text = serde_json::to_string_pretty(record)?;
-    writeln!(file, "{text}").with_context(|| format!("writing {}", path.display()))
+    writeln!(file, "{text}").with_context(|| format!("writing {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("flushing {}", path.display()))
 }
 
 /// A logged-in API session.  The token lives only in its headers.
@@ -475,5 +491,16 @@ mod tests {
         fs::remove_file(&path).expect("cleanup");
         assert_eq!(mode & 0o777, 0o600);
         assert!(again.is_err(), "an existing key file is never replaced");
+        let leftovers = fs::read_dir(std::env::temp_dir())
+            .expect("temp dir")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&format!("jackerymon-key-{}.", std::process::id()))
+            })
+            .count();
+        assert_eq!(leftovers, 0, "no temporary key file is left behind");
     }
 }

@@ -102,6 +102,7 @@ async fn events(
     Sse::new(updates).keep_alive(KeepAlive::new().interval(EVENT_KEEP_ALIVE))
 }
 
+/// `POST /settings` query parameters.
 #[derive(Deserialize)]
 struct SettingQuery {
     /// Required for a setting with a warning, as `set --yes` is.
