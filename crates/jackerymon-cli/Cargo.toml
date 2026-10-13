@@ -1,6 +1,6 @@
 [package]
 name = "jackerymon-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -23,7 +23,7 @@ ecb = { version = "0.2.1", features = ["alloc"] }
 env_logger = "0.11.11"
 flate2 = "1.1.10"
 futures = "0.3.34"
-jackerymon = { version = "0.1.0", path = "../jackerymon" }
+jackerymon = { version = "0.1.1", path = "../jackerymon" }
 libc = "0.2.190"
 log = "0.4.34"
 rand = "0.10.3"
@@ -60,7 +60,6 @@ assets = [
     ["target/release/jackerymon", "usr/bin/", "755"],
     ["../../README.md", "usr/share/doc/jackerymon/", "644"],
     ["../../LICENSE-APACHE", "usr/share/doc/jackerymon/", "644"],
-    ["debian/sysusers.conf", "usr/lib/sysusers.d/jackerymon.conf", "644"],
     ["debian/default", "etc/default/jackerymon", "644"],
     ["debian/jackerymon-compress.service", "usr/lib/systemd/system/", "644"],
     ["debian/jackerymon-compress.timer", "usr/lib/systemd/system/", "644"],

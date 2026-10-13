@@ -125,11 +125,13 @@ once the Rust key fetch matched it (it remains in git history).
   amd64 and arm64, glibc of Ubuntu 22.04 so Debian bookworm installs it.
   A `v*` tag releases.  The toolchain is pinned in `rust-toolchain.toml`.
 - **License: MIT OR Apache-2.0.**
-- **The daemon runs as system user and group `jackerymon`,** created by
-  sysusers.d (`postinst` applies it; cargo-deb does not).  Group members
-  may use the socket in `/run/jackerymon` and read keys in
-  `/etc/jackerymon`.  The unit is installed disabled: it needs a key
-  first.
+- **The daemon runs as system user and group `jackerymon`,** from
+  `debian/jackerymon.sysusers`, which cargo-deb (3.8 and later) installs
+  and applies in `postinst`.  v0.1.0 also carried a hand-written
+  sysusers call; cargo-deb 3.8 then added one naming the source file,
+  which failed and left the package unconfigured.  Group members may use
+  the socket in `/run/jackerymon` and read keys in `/etc/jackerymon`.
+  The unit is installed disabled: it needs a key first.
 - **`/etc/default/jackerymon` sets TCP:** `JACKERYMON_LISTEN` and
   `JACKERYMON_TCP_CONTROL`, which the daemon also reads from its
   environment.  A conffile, so edits survive upgrades.
