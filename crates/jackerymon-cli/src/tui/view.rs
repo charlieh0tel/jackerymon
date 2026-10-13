@@ -3,12 +3,6 @@
 use std::time::Duration;
 
 use jackerymon::control::Setting;
-use jackerymon::status::BatteryProtection;
-use jackerymon::status::BatteryState;
-use jackerymon::status::ChargeSpeed;
-use jackerymon::status::LightMode;
-use jackerymon::status::OffTimer;
-use jackerymon::status::ScreenMode;
 use jackerymon::status::Status;
 use jackerymon::status::TemperatureAlarm;
 use ratatui::Frame;
@@ -37,13 +31,22 @@ use super::monitor::ControlState;
 use super::monitor::HISTORY;
 use super::monitor::Link;
 use super::monitor::Monitor;
+use crate::text::battery_protection_text;
+use crate::text::battery_state_text;
+use crate::text::charge_speed_text;
+use crate::text::fault_text;
+use crate::text::hours_text;
+use crate::text::light_text;
+use crate::text::on_off;
+use crate::text::screen_text;
+use crate::text::temperature_alarm_text;
+use crate::text::timer_text;
 
 /// Data older than this is shown as stale.
 pub(super) const STALE_AFTER: Duration = Duration::from_secs(30);
 const PANEL_HEIGHT: u16 = 9;
 /// Fits the longest label, "Temp alarm", plus a space.
 const LABEL_WIDTH: usize = 11;
-const MINUTES_PER_HOUR: u32 = 60;
 const SECONDS_PER_MINUTE: u64 = 60;
 /// Chart y axis never shrinks below this, so idle noise stays flat.
 const MIN_CHART_WATTS: f64 = 10.0;
@@ -181,17 +184,8 @@ fn setting_value_text(setting: Setting) -> String {
         Setting::Light(mode) => light_text(mode),
         Setting::Screen(mode) => screen_text(mode),
         Setting::AutoOff(timer) | Setting::EnergySaving(timer) => timer_text(timer),
-        Setting::ChargeSpeed(speed) => match speed {
-            ChargeSpeed::Fast => "fast".to_owned(),
-            ChargeSpeed::Quiet => "quiet".to_owned(),
-            ChargeSpeed::Custom => "custom".to_owned(),
-            ChargeSpeed::Unknown(value) => format!("unknown ({value})"),
-        },
-        Setting::BatteryProtection(protection) => match protection {
-            BatteryProtection::Full => "full".to_owned(),
-            BatteryProtection::Eco => "eco".to_owned(),
-            BatteryProtection::Unknown(value) => format!("unknown ({value})"),
-        },
+        Setting::ChargeSpeed(speed) => charge_speed_text(speed),
+        Setting::BatteryProtection(protection) => battery_protection_text(protection),
     }
 }
 
@@ -437,14 +431,6 @@ fn alert_row(label: &str, value: Option<String>, alert: bool) -> Line<'static> {
     }
 }
 
-fn on_off(state: bool) -> String {
-    if state { "on" } else { "off" }.to_owned()
-}
-
-fn hours_text(hours: f64) -> String {
-    format!("{hours:.1} h")
-}
-
 /// The unit reports 0 h to full while nothing charges; that is not an
 /// estimate.
 fn to_full_text(status: &Status) -> Option<String> {
@@ -463,62 +449,6 @@ fn ac_output_text(status: &Status) -> Option<String> {
         ))
     } else {
         Some(MISSING.to_owned())
-    }
-}
-
-fn battery_state_text(state: BatteryState) -> String {
-    match state {
-        BatteryState::Idle => "idle".to_owned(),
-        BatteryState::Charging => "charging".to_owned(),
-        BatteryState::Discharging => "discharging".to_owned(),
-        BatteryState::Unknown(value) => format!("unknown ({value})"),
-    }
-}
-
-fn light_text(mode: LightMode) -> String {
-    match mode {
-        LightMode::Off => "off".to_owned(),
-        LightMode::Low => "low".to_owned(),
-        LightMode::High => "high".to_owned(),
-        LightMode::Sos => "SOS".to_owned(),
-        LightMode::Unknown(value) => format!("unknown ({value})"),
-    }
-}
-
-fn screen_text(mode: ScreenMode) -> String {
-    match mode {
-        ScreenMode::Off => "off".to_owned(),
-        ScreenMode::Brief => "2 min".to_owned(),
-        ScreenMode::Steady => "2 h".to_owned(),
-        ScreenMode::Unknown(value) => format!("unknown ({value})"),
-    }
-}
-
-fn temperature_alarm_text(alarm: TemperatureAlarm) -> String {
-    match alarm {
-        TemperatureAlarm::None => "none".to_owned(),
-        TemperatureAlarm::High => "high".to_owned(),
-        TemperatureAlarm::Low => "low".to_owned(),
-        TemperatureAlarm::Unknown(value) => format!("unknown ({value})"),
-    }
-}
-
-fn timer_text(timer: OffTimer) -> String {
-    match timer {
-        OffTimer::Never => "never".to_owned(),
-        OffTimer::Minutes(minutes) if minutes % MINUTES_PER_HOUR == 0 => {
-            format!("{} h", minutes / MINUTES_PER_HOUR)
-        }
-        OffTimer::Minutes(minutes) => format!("{minutes} min"),
-    }
-}
-
-/// The app shows code n as fault F(n-1).
-fn fault_text(code: i64) -> String {
-    if code == 0 {
-        "none".to_owned()
-    } else {
-        format!("F{}", code - 1)
     }
 }
 

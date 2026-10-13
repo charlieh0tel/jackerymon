@@ -9,6 +9,7 @@ mod record;
 mod runtime;
 mod scan;
 mod set;
+mod text;
 mod tui;
 
 use std::env;
