@@ -147,6 +147,17 @@ impl ConnectionArgs {
             None => find_key(&home.directory()?, self.unit.as_deref())?,
         };
         let mut key_file = KeyFile::load(&path)?;
+        // `--unit A` picks `A.json`; a copied or renamed file could hold
+        // another unit's key.
+        if let Some(unit) = &self.unit
+            && key_file.serial.as_str() != unit
+        {
+            bail!(
+                "{} holds the key for unit {}, not {unit}",
+                path.display(),
+                key_file.serial
+            );
+        }
         if let Some(address) = &self.address {
             key_file.address.clone_from(address);
         }

@@ -49,6 +49,9 @@ use crate::poll::poll_with;
 
 /// Jackery service; its service data carries the advertisement payload.
 const SERVICE: Uuid = bluetooth_uuid(0xbdee);
+/// Bound on BlueZ calls outside a connect attempt, such as finding the
+/// adapter; bluer's own D-Bus timeout is two minutes.
+const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Write-without-response command characteristic.
 const COMMAND: Uuid = bluetooth_uuid(0xee01);
 /// Notify characteristic carrying responses.
@@ -98,7 +101,13 @@ impl BleError {
 ///
 /// Fails if BlueZ is unreachable or there is no adapter.
 pub async fn default_adapter() -> Result<Adapter, BleError> {
-    Ok(Session::new().await?.default_adapter().await?)
+    let session = bounded(SETUP_TIMEOUT, "connecting to BlueZ", Session::new()).await?;
+    bounded(
+        SETUP_TIMEOUT,
+        "finding the Bluetooth adapter",
+        session.default_adapter(),
+    )
+    .await
 }
 
 /// Polls the unit named by `key_file`; see [`crate::poll`].
@@ -153,18 +162,24 @@ pub async fn scan(
                 .map_err(|_| BleError::InvalidAddress(text.to_owned()))
         })
         .transpose()?;
-    adapter
-        .set_discovery_filter(DiscoveryFilter {
-            transport: DiscoveryTransport::Le,
-            duplicate_data: true,
-            uuids: HashSet::from([SERVICE]),
-            pattern: only.map(|address| address.to_string()),
-            ..DiscoveryFilter::default()
-        })
-        .await?;
+    let filter = adapter.set_discovery_filter(DiscoveryFilter {
+        transport: DiscoveryTransport::Le,
+        duplicate_data: true,
+        uuids: HashSet::from([SERVICE]),
+        pattern: only.map(|address| address.to_string()),
+        ..DiscoveryFilter::default()
+    });
+    bounded(SETUP_TIMEOUT, "setting the scan filter", filter).await?;
     let mut heard_by_address = BTreeMap::new();
     // Discovery stops when this stream is dropped.
-    let mut discovery = Box::pin(adapter.discover_devices_with_changes().await?);
+    let mut discovery = Box::pin(
+        bounded(
+            SETUP_TIMEOUT,
+            "starting the scan",
+            adapter.discover_devices_with_changes(),
+        )
+        .await?,
+    );
     let listening = async {
         while let Some(event) = discovery.next().await {
             let AdapterEvent::DeviceAdded(address) = event else {
@@ -266,7 +281,7 @@ impl Unit {
     /// Connects, resolves services, and subscribes to notifications.
     async fn open(&self, device: &Device, limit: Duration) -> Result<Connection, BleError> {
         // Subscribe before connecting so no disconnect is missed.
-        let events = Box::pin(device.events().await?);
+        let events = Box::pin(bounded(limit, "watching the device", device.events()).await?);
         bounded(limit, "connecting", device.connect()).await?;
         let services = bounded(limit, "discovering services", device.services()).await?;
         let (command, notify) = bounded(limit, "discovering characteristics", async {
@@ -320,24 +335,30 @@ impl Connector for Unit {
         // A process that exited without disconnecting leaves BlueZ
         // connected, and a connected unit does not advertise.
         let device = self.adapter.device(self.address)?;
-        if device.is_connected().await.unwrap_or(false) {
+        if is_connected(&device, limit).await {
             info!("reusing the open BlueZ connection to {}", self.address);
             return self.open_or_disconnect(&device, limit).await;
         }
         self.clear_impostor(limit).await?;
         // Only objects for addresses starting with the unit's are created,
         // which keeps other devices' advertisements out of BlueZ.
-        self.adapter
-            .set_discovery_filter(DiscoveryFilter {
-                transport: DiscoveryTransport::Le,
-                duplicate_data: true,
-                pattern: Some(self.address.to_string()),
-                ..DiscoveryFilter::default()
-            })
-            .await?;
+        let filter = self.adapter.set_discovery_filter(DiscoveryFilter {
+            transport: DiscoveryTransport::Le,
+            duplicate_data: true,
+            pattern: Some(self.address.to_string()),
+            ..DiscoveryFilter::default()
+        });
+        bounded(limit, "setting the scan filter", filter).await?;
         let found = {
             // Discovery stops when this stream is dropped.
-            let mut discovery = Box::pin(self.adapter.discover_devices_with_changes().await?);
+            let mut discovery = Box::pin(
+                bounded(
+                    limit,
+                    "starting the scan",
+                    self.adapter.discover_devices_with_changes(),
+                )
+                .await?,
+            );
             timeout(limit, self.find(&mut discovery)).await
         };
         let device = found.map_err(|_| BleError::NotFound)??;
@@ -346,7 +367,7 @@ impl Connector for Unit {
 
     async fn abandon(&mut self, limit: Duration) {
         if let Ok(device) = self.adapter.device(self.address)
-            && device.is_connected().await.unwrap_or(false)
+            && is_connected(&device, limit).await
         {
             disconnect(&device, limit).await;
         }
@@ -474,10 +495,18 @@ async fn is_impostor(device: &Device) -> bluer::Result<bool> {
             .is_none_or(|data| data.is_empty()))
 }
 
+/// Whether BlueZ shows `device` connected; an unanswered or failed query
+/// counts as no.
+async fn is_connected(device: &Device, limit: Duration) -> bool {
+    bounded(limit, "checking the connection", device.is_connected())
+        .await
+        .unwrap_or(false)
+}
+
 /// Disconnects within `limit`.  A device already gone is fine; any other
 /// failure is logged, since the unit may stay connected and unreachable.
 async fn disconnect(device: &Device, limit: Duration) {
-    if !device.is_connected().await.unwrap_or(false) {
+    if !is_connected(device, limit).await {
         return;
     }
     if let Err(error) = bounded(limit, "disconnecting", device.disconnect()).await {
