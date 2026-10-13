@@ -31,6 +31,7 @@ use tokio::signal::unix::signal;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::time::sleep;
 
 use crate::connection::ConnectionArgs;
 use crate::connection::KeyHome;
@@ -45,6 +46,8 @@ const EVENT_BUFFER: usize = 64;
 /// How often `/events` sends a comment while idle, so a client can tell
 /// a quiet daemon from a dead connection.
 pub(crate) const EVENT_KEEP_ALIVE: Duration = Duration::from_secs(15);
+/// How long open requests may finish after polling ends.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// Settings queued from HTTP while one is being applied.
 const COMMAND_BUFFER: usize = 8;
 
@@ -213,7 +216,22 @@ async fn serve(
     )
     .with_graceful_shutdown(shared.stopped())
     .into_future();
-    let (polled, socket, tcp) = tokio::join!(polling, socket, tcp);
+    // Requests still open this long after polling ends are dropped, so a
+    // client that never finishes one cannot hold the daemon.
+    let servers = async { tokio::join!(socket, tcp) };
+    let bounded = async {
+        tokio::select! {
+            served = servers => served,
+            () = async {
+                shared.stopped().await;
+                sleep(SHUTDOWN_GRACE).await;
+            } => {
+                eprintln!("dropping requests still open {SHUTDOWN_GRACE:?} after polling ended");
+                (Ok(()), Ok(()))
+            }
+        }
+    };
+    let (polled, (socket, tcp)) = tokio::join!(polling, bounded);
     polled?;
     socket.context("serving the socket")?;
     tcp.context("serving TCP")
@@ -238,11 +256,14 @@ mod tests {
     use anyhow::anyhow;
     use futures::StreamExt;
     use reqwest::StatusCode;
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
+    use tokio::net::UnixStream;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
 
     use super::Listeners;
+    use super::SHUTDOWN_GRACE;
     use super::Shared;
     use super::serve;
     use crate::daemon_client::DaemonClient;
@@ -327,6 +348,41 @@ mod tests {
             let rest = timeout(PROMPTLY, events.next()).await.expect("stream ends");
             assert!(rest.is_none_or(|chunk| chunk.is_err()));
         }
+        drop(claimed);
+        fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn a_request_never_finished_does_not_hold_shutdown() {
+        let (shared, _requests) = Shared::new("123456789".to_owned());
+        let path = socket_path("stalled");
+        let (socket, claimed) = runtime::claim(&path).expect("socket");
+        let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let (fail, failed) = oneshot::channel::<()>();
+        let listeners = Listeners {
+            socket,
+            tcp,
+            tcp_control: false,
+        };
+        let served = tokio::spawn(serve(shared, listeners, async move {
+            failed.await.ok();
+            Err(anyhow!("stopped"))
+        }));
+        // Headers promise a body that never comes.
+        let mut stalled = UnixStream::connect(&path).await.expect("connect");
+        stalled
+            .write_all(
+                b"POST /settings HTTP/1.1\r\nHost: localhost\r\n\
+                  Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{",
+            )
+            .await
+            .expect("write");
+        fail.send(()).expect("poller waiting");
+        let result = timeout(SHUTDOWN_GRACE + PROMPTLY, served)
+            .await
+            .expect("serving ends despite the stalled request")
+            .expect("task");
+        assert!(result.is_err());
         drop(claimed);
         fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
     }

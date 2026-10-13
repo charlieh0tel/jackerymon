@@ -13,6 +13,7 @@ use std::fs::OpenOptions;
 use std::fs::TryLockError;
 use std::io::ErrorKind;
 use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
@@ -117,12 +118,22 @@ fn lock_in(directory: &Path, serial: &str) -> Result<UnitLock> {
 /// A bound socket, removed when dropped.
 pub(crate) struct Claimed {
     path: PathBuf,
+    /// Device and inode of the socket bound, so a later daemon's socket
+    /// at the same path is left alone.
+    identity: (u64, u64),
 }
 
 impl Drop for Claimed {
     fn drop(&mut self) {
-        fs::remove_file(&self.path).ok();
+        if identity(&self.path).is_some_and(|current| current == self.identity) {
+            fs::remove_file(&self.path).ok();
+        }
     }
+}
+
+fn identity(path: &Path) -> Option<(u64, u64)> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    Some((metadata.dev(), metadata.ino()))
 }
 
 /// Binds `path` for this daemon.  Fails if a live daemon answers there;
@@ -144,6 +155,7 @@ pub(crate) fn claim(path: &Path) -> Result<(UnixListener, Claimed)> {
         UnixListener::bind(path).with_context(|| format!("listening on {}", path.display()))?;
     let claimed = Claimed {
         path: path.to_owned(),
+        identity: identity(path).context("reading the socket just bound")?,
     };
     fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))
         .with_context(|| format!("setting permissions on {}", path.display()))?;
@@ -261,6 +273,22 @@ mod tests {
         assert!(lock_in(&directory, "222").is_ok(), "another unit is free");
         drop(held);
         assert!(lock_in(&directory, "111").is_ok(), "released");
+        fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn leaves_a_later_daemons_socket_alone() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-identity-{}", std::process::id()));
+        let path = socket_path(&directory, "111");
+        let (first_listener, first) = claim(&path).expect("first");
+        drop(first_listener);
+        // A dead daemon's file is reclaimed by the next one.
+        let (_second_listener, second) = claim(&path).expect("second");
+        drop(first);
+        assert!(path.exists(), "the first guard left the second socket");
+        drop(second);
+        assert!(!path.exists());
         fs::remove_dir_all(&directory).expect("cleanup");
     }
 }

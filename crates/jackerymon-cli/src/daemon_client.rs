@@ -24,6 +24,9 @@ const DAEMON_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 const DAEMON_SETTING_TIMEOUT: Duration = Duration::from_secs(70);
 /// Keep-alives the event stream may miss before it counts as dead.
 const MISSED_KEEP_ALIVES: u32 = 3;
+/// Largest event accepted; a status sample is a few hundred bytes.
+const MAX_EVENT_BYTES: usize = 64 * 1024;
+const CARRIAGE_RETURN: u8 = b'\r';
 /// Separates server-sent events.
 const EVENT_SEPARATOR: &[u8] = b"\n\n";
 const EVENT_DATA_PREFIX: &str = "data:";
@@ -179,8 +182,11 @@ impl DaemonClient {
                 Ok(chunk) => chunk,
                 Err(error) => return error.into(),
             };
-            buffer.extend_from_slice(&chunk);
-            for update in drain_events(&mut buffer) {
+            let updates = match receive(&mut buffer, &chunk) {
+                Ok(updates) => updates,
+                Err(error) => return error,
+            };
+            for update in updates {
                 *consecutive = 0;
                 if sender.send(update).is_err() {
                     return anyhow!("screen closed");
@@ -211,6 +217,18 @@ impl DaemonClient {
     }
 }
 
+/// Adds `chunk` to `buffer` and takes off the complete events.  Fails if
+/// an event grows past [`MAX_EVENT_BYTES`].
+fn receive(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<Update>, anyhow::Error> {
+    // Dropping CR accepts CRLF line endings; lone CR is unused.
+    buffer.extend(chunk.iter().filter(|&&byte| byte != CARRIAGE_RETURN));
+    let updates = drain_events(buffer);
+    if buffer.len() > MAX_EVENT_BYTES {
+        return Err(anyhow!("daemon event over {MAX_EVENT_BYTES} bytes"));
+    }
+    Ok(updates)
+}
+
 /// Takes the complete events off the front of `buffer`, leaving a partial
 /// one.  Splitting on bytes keeps a character cut between chunks whole.
 fn drain_events(buffer: &mut Vec<u8>) -> Vec<Update> {
@@ -236,8 +254,10 @@ fn parse_event(event: &str) -> Vec<Update> {
 
 #[cfg(test)]
 mod tests {
+    use super::MAX_EVENT_BYTES;
     use super::drain_events;
     use super::parse_event;
+    use super::receive;
     use crate::record::Update;
 
     #[test]
@@ -264,5 +284,18 @@ mod tests {
             }]
         );
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn accepts_crlf_and_caps_event_size() {
+        let mut buffer = Vec::new();
+        let updates = receive(
+            &mut buffer,
+            b"data: {\"type\":\"connected\",\"connection\":1}\r\n\r\n",
+        )
+        .expect("event");
+        assert_eq!(updates, [Update::Connected { connection: 1 }]);
+        let endless = vec![b'x'; MAX_EVENT_BYTES + 1];
+        assert!(receive(&mut buffer, &endless).is_err());
     }
 }
