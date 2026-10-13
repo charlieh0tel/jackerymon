@@ -1,0 +1,30 @@
+# Releasing
+
+A `vX.Y.Z` tag on a green `main` builds amd64 and arm64 `.deb`s and
+publishes a GitHub Release (`.github/workflows/build-deb.yml`); a failed
+`cargo audit` blocks it.
+
+1. Bump `version` in both crates and the CLI's `jackerymon` dependency;
+   `cargo update -w`.
+2. Check: `cargo fmt --check`, `cargo clippy --workspace --all-targets`,
+   `cargo test`, `cargo audit --ignore RUSTSEC-2023-0071` (see PLAN.md).
+3. Merge through a PR; wait for CI.
+4. Test the PR's CI-built packages, not local ones (glibc and
+   cargo-deb versions differ):
+
+   ```sh
+   gh run download <run> -D ci
+   tools/test-package.sh ci/debian-package-amd64/*.deb
+   tools/test-package.sh ci/debian-package-amd64/*.deb ubuntu:22.04
+   tools/test-package.sh ci/debian-package-arm64/*.deb debian:bookworm linux/arm64
+   ```
+
+5. `git tag -a vX.Y.Z -m "jackerymon X.Y.Z" && git push origin vX.Y.Z`;
+   confirm both `.deb`s on the release.
+
+Never re-tag a release someone may have installed; fix forward with a
+new patch version.  A broken release nobody consumed may be deleted
+(`gh release delete vX.Y.Z --cleanup-tag`), as 0.1.0 was.
+
+cargo-deb is pinned in the shared workflow (`cargo-deb-version`);
+changing it can change maintainer scripts, so re-run step 4.

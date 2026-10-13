@@ -117,4 +117,5 @@ Daemon options are in `/etc/default/jackerymon`.  Samples go to
 `/var/lib/jackerymon/`, one file per day; a daily timer gzips finished
 days, and nothing is deleted.
 
-To build the package: `cargo deb -p jackerymon-cli`.
+To build the package: `cargo deb -p jackerymon-cli`; to release, see
+[RELEASING.md](RELEASING.md).
