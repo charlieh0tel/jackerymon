@@ -35,6 +35,8 @@ const SOCKET_EXTENSION: &str = "sock";
 const LOCK_DIRECTORY: &str = "/run/lock";
 const LOCK_PREFIX: &str = "jackerymon-";
 const LOCK_EXTENSION: &str = "lock";
+/// Readable by all, so any user's jackerymon can open and lock it.
+const LOCK_MODE: u32 = 0o644;
 /// Owner and group may connect.  A user's runtime directory is private;
 /// the system daemon's admits the `jackerymon` group.
 const SOCKET_MODE: u32 = 0o660;
@@ -88,23 +90,33 @@ fn lock_in(directory: &Path, serial: &str) -> Result<UnitLock> {
     let path = directory
         .join(format!("{LOCK_PREFIX}{serial}"))
         .with_extension(LOCK_EXTENSION);
-    // A symlink planted in the shared directory is never followed.
+    // A symlink planted in the shared directory is never followed, and a
+    // FIFO cannot block the open.
+    let flags = libc::O_NOFOLLOW | libc::O_NONBLOCK;
     let created = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(flags)
         .open(&path);
     // Another user's lock cannot be opened for writing, or created over in
     // a sticky directory; reading it is enough to lock it.
     let file = match created {
         Err(error) if error.kind() == ErrorKind::PermissionDenied => OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            .custom_flags(flags)
             .open(&path),
         other => other,
     }
     .with_context(|| format!("opening {}", path.display()))?;
+    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        bail!("{} is not a regular file", path.display());
+    }
+    // Others must be able to open the lock to take it, whatever umask
+    // created it.  Only the owner may change the mode; for anyone else it
+    // is already right or out of their hands.
+    file.set_permissions(fs::Permissions::from_mode(LOCK_MODE))
+        .ok();
     match file.try_lock() {
         Ok(()) => Ok(UnitLock { _file: file }),
         Err(TryLockError::WouldBlock) => bail!(
@@ -250,6 +262,8 @@ fn sockets_in(directory: &Path) -> Vec<PathBuf> {
 mod tests {
     use std::fs;
 
+    use std::os::unix::fs::PermissionsExt;
+
     use super::claim;
     use super::find_in;
     use super::lock_in;
@@ -317,6 +331,30 @@ mod tests {
         assert!(path.exists(), "the first guard left the second socket");
         drop(second);
         assert!(!path.exists());
+        fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[test]
+    fn lock_is_readable_by_all_and_refuses_odd_files() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-lockmode-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("directory");
+        let path = directory.join("jackerymon-111.lock");
+        fs::write(&path, "").expect("lock file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("narrow");
+        drop(lock_in(&directory, "111").expect("lock"));
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644, "a strict umask's lock is opened up");
+        let fifo = directory.join("jackerymon-222.lock");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        assert!(
+            lock_in(&directory, "222").is_err(),
+            "a FIFO is refused, not waited on"
+        );
         fs::remove_dir_all(&directory).expect("cleanup");
     }
 }
