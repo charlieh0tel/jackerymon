@@ -37,6 +37,7 @@ const MAX_PAGES: u16 = 256;
 /// Status fields keyed by wire name, unknown keys included.
 pub type RawStatus = Map<String, Value>;
 
+/// Why a response frame could not be decoded.
 #[derive(Debug, Error)]
 pub enum DecodeError {
     #[error("BLE response exceeds {MAX_RESPONSE_BYTES} bytes")]

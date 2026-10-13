@@ -43,6 +43,7 @@ use crate::tui::source::Command;
 /// Redraw at least this often so the data age stays current.
 const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Options of `jackerymon tui`.
 #[derive(Args)]
 pub(crate) struct TuiArgs {
     #[command(flatten)]

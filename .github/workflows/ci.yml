@@ -13,6 +13,8 @@ jobs:
     with:
       build-deps: "libdbus-1-dev pkg-config"
       check-args: "--workspace --all-targets"
+      # Format with the pinned toolchain's rustfmt, as developers do.
+      fmt-toolchain: ""
       # RUSTSEC-2023-0071 (rsa, Marvin timing attack) concerns private-key
       # operations; `jackerymon key` only encrypts with the app's public
       # key.  See PLAN.md.

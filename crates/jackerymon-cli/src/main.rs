@@ -50,6 +50,7 @@ fn journal_priority(level: Level) -> u8 {
 /// recovering the unit from a stale BlueZ object.
 const DEFAULT_LOG_FILTER: &str = "jackerymon=info";
 
+/// The command line: one subcommand.
 #[derive(Parser)]
 #[command(name = "jackerymon", about, version)]
 struct Cli {
@@ -57,6 +58,7 @@ struct Cli {
     command: Command,
 }
 
+/// The subcommands.
 #[derive(Subcommand)]
 enum Command {
     /// Poll status on one connection; JSON lines on stdout, diagnostics on

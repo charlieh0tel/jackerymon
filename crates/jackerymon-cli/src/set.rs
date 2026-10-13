@@ -30,6 +30,7 @@ use crate::daemon_client::RouteArgs;
 const MAX_FAILURES: NonZeroU32 = NonZeroU32::new(3).expect("nonzero");
 const MINUTES_PER_HOUR: u32 = 60;
 
+/// Options of `jackerymon set`.
 #[derive(Args)]
 pub(crate) struct SetArgs {
     #[command(flatten)]
@@ -45,6 +46,7 @@ pub(crate) struct SetArgs {
     setting: SettingArgs,
 }
 
+/// The setting to change, one subcommand each.
 #[derive(Subcommand)]
 enum SettingArgs {
     /// AC output.
@@ -89,12 +91,14 @@ enum SettingArgs {
     },
 }
 
+/// On or off, as typed.
 #[derive(Clone, Copy, ValueEnum)]
 enum Switch {
     On,
     Off,
 }
 
+/// Light modes, as typed.
 #[derive(Clone, Copy, ValueEnum)]
 enum Light {
     Off,
@@ -103,6 +107,7 @@ enum Light {
     Sos,
 }
 
+/// Screen timeouts, as typed.
 #[derive(Clone, Copy, ValueEnum)]
 enum Screen {
     Off,
@@ -112,12 +117,14 @@ enum Screen {
     TwoHours,
 }
 
+/// Charge speeds that can be set, as typed.
 #[derive(Clone, Copy, ValueEnum)]
 enum Speed {
     Fast,
     Quiet,
 }
 
+/// Battery protection modes, as typed.
 #[derive(Clone, Copy, ValueEnum)]
 enum Protection {
     Full,

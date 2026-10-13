@@ -74,6 +74,7 @@ const PRIVATE_FILE_MODE: u32 = 0o600;
 /// Extension of the key file while it is written, before the process id.
 const TEMPORARY_EXTENSION: &str = "partial-";
 
+/// Options of `jackerymon key`.
 #[derive(Args)]
 pub(crate) struct KeyArgs {
     /// BLE address of the unit; needed when several are in range.

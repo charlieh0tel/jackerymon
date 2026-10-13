@@ -94,7 +94,8 @@ curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
 ```
 
 Setting keys and values are in `docs/protocol.md`; other options are in
-`jackerymon daemon --help`.  TCP has no authentication, so with
+`jackerymon daemon --help`. A custom `--socket` belongs in a directory
+only its users can write. TCP has no authentication, so with
 `--tcp-control` anyone who reaches it, including a web page through DNS
 rebinding, can switch outputs.
 

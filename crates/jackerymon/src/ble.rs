@@ -67,6 +67,7 @@ const fn bluetooth_uuid(short: u16) -> Uuid {
 type Notifications = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 type DeviceEvents = Pin<Box<dyn Stream<Item = DeviceEvent> + Send>>;
 
+/// Why a BLE operation failed.
 #[derive(Debug, Error)]
 pub enum BleError {
     #[error(transparent)]

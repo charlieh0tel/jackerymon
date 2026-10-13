@@ -15,6 +15,7 @@ use crate::record::UnitRecord;
 /// Seconds to listen for units, unless `--timeout` says otherwise.
 pub(crate) const DEFAULT_LISTEN: &str = "10";
 
+/// Options of `jackerymon scan`.
 #[derive(Args)]
 pub(crate) struct ScanArgs {
     /// Seconds to listen.

@@ -92,6 +92,7 @@ pub enum PollEvent {
     },
 }
 
+/// Why polling stopped.
 #[derive(Debug, Error)]
 pub enum PollError {
     #[error("polling stopped after {count} consecutive transport failures: {last}")]
@@ -430,6 +431,7 @@ mod tests {
         abandoned: Rc<RefCell<u32>>,
     }
 
+    /// A scripted link: answers from the shared script.
     struct FakeLink {
         script: Script,
         drop_while_idle: bool,

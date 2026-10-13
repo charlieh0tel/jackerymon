@@ -54,7 +54,8 @@ Jackery's cloud: a live terminal view, settings, and a daemon that \
 serves Prometheus metrics, status, and control on a Unix socket."""
 section = "utils"
 priority = "optional"
-depends = "$auto, bluez"
+# systemd provides systemd-sysusers and systemd-tmpfiles for postinst.
+depends = "$auto, bluez, systemd"
 assets = [
     ["target/release/jackerymon", "usr/bin/", "755"],
     ["../../README.md", "usr/share/doc/jackerymon/", "644"],

@@ -54,6 +54,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// Settings queued from HTTP while one is being applied.
 const COMMAND_BUFFER: usize = 8;
 
+/// Options of `jackerymon daemon`.
 #[derive(Args)]
 pub(crate) struct DaemonArgs {
     #[command(flatten)]

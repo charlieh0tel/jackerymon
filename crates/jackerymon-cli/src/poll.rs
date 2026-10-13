@@ -16,6 +16,7 @@ use crate::connection::ConnectionArgs;
 use crate::connection::KeyHome;
 use crate::record::SampleRecord;
 
+/// Options of `jackerymon poll`.
 #[derive(Args)]
 pub(crate) struct PollArgs {
     #[command(flatten)]

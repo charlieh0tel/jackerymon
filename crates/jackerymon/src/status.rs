@@ -13,6 +13,7 @@ use crate::frame::RawStatus;
 /// Wire values in tenths of a unit (temperature, voltage, hours).
 const TENTHS_PER_UNIT: f64 = 10.0;
 
+/// A status field that does not decode.
 #[derive(Debug, Error, PartialEq)]
 #[error("status field `{key}` has invalid value {value}")]
 pub struct StatusError {

@@ -46,6 +46,7 @@ pub enum Setting {
     Ups(bool),
 }
 
+/// Why a setting was not applied.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ControlError {
     #[error("unit rejected {setting} with code {code}")]

@@ -141,6 +141,16 @@ once the Rust key fetch matched it (it remains in git history).
 - **cargo-deb applies one enable/start setting to every unit in a
   package,** so the timer is not a separately enabled unit; the daemon's
   `Wants=` starts it.
+- **The package assumes a systemd host.**  Purging it keeps keys in
+  `/etc/jackerymon` and history in `/var/lib/jackerymon`.
+- **Known limits, accepted:** the unit lock is cooperative: a local user
+  who owns a stale lock file can replace it, so it keeps honest
+  processes apart rather than hostile users.  A custom `--socket` must
+  be in a directory others cannot write, or someone could connect in the
+  moment before its mode is set.  A sample written more than fifteen
+  minutes after midnight for the day before, or a clock stepping back
+  into a compressed day, is not compressed and makes `compress-logs`
+  report the leftover file.
 - **RUSTSEC-2023-0071 (`rsa`, Marvin timing attack) is accepted.**  It
   concerns private-key operations; `jackerymon key` only encrypts with
   the app's public key.  CI ignores that advisory by ID.

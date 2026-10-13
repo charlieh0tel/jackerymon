@@ -8,6 +8,7 @@ use thiserror::Error;
 const MIN_SERIAL_LENGTH: usize = 8;
 const GUID_LENGTH: usize = 6;
 
+/// Why a serial or key is invalid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
     #[error("serial must be at least {MIN_SERIAL_LENGTH} decimal digits")]

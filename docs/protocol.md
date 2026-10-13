@@ -180,9 +180,11 @@ Sources: `LoginApi.java`, `vc/b.java`, `ce/d.java`, `ce/h.java`,
 `DeviceBluetoothApi.java`, `DeviceBindApi.java`, `AppApplication.java`,
 `RequestServer.java`, `BluetoothScanDeviceActivity.java` in scratch sources.
 The user completed login and a key file was produced; that key was then
-validated with a live GATT status query. The specific bootstrap endpoint
-used was not recorded. Key files hold only selected device metadata and
-the key, never the password or account token.
+validated with a live GATT status query. Which endpoint produced that
+first key was not recorded; later, `jackerymon key` fetched the same key
+by `device/bluetoothKey` lookup, without binding. Key files hold only
+selected device metadata and the key, never the password or account
+token.
 
 ### Codec by device type
 
@@ -239,8 +241,8 @@ variant with no IV. The saved key now successfully decodes a live status
 response. The user removed Wi-Fi credentials before testing began; all
 BLE tests used the unit in that state. Three repeat queries succeeded with
 the same saved key and no retries or client cloud requests. These tests do
-not measure key changes on Wi-Fi credential removal. Power-cycle/reset/
-unbinding behavior is untested.
+not measure key changes on Wi-Fi credential removal. The key survived a
+power-cycle (`FINDINGS.md`); reset and unbinding are untested.
 Obtaining the key without cloud bootstrap remains unresolved.
 
 The poller has one pending query at a time, with its own decoder. It

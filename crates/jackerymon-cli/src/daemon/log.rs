@@ -33,6 +33,7 @@ const COMPRESSED_SUFFIX: &str = ".gz";
 /// Appended while compressing, so a crash leaves no truncated archive.
 const PARTIAL_SUFFIX: &str = ".partial";
 
+/// Options of `jackerymon compress-logs`.
 #[derive(Args)]
 pub(crate) struct CompressArgs {
     /// The daemon's `--log-dir`.

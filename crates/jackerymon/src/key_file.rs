@@ -15,6 +15,7 @@ use crate::identity::IdentityError;
 use crate::identity::ModelCode;
 use crate::identity::Serial;
 
+/// Why a key file could not be loaded.
 #[derive(Debug, Error)]
 pub enum KeyFileError {
     #[error("cannot read key file {path}: {source}")]
