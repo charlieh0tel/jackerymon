@@ -6,15 +6,19 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
+use std::io::ErrorKind;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use chrono::Utc;
 use clap::Args;
 use flate2::Compression;
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 
 use crate::record::SampleRecord;
@@ -46,7 +50,7 @@ pub(crate) fn compress_logs(arguments: &CompressArgs) -> Result<()> {
         }
     }
     if failures > 0 {
-        anyhow::bail!("{failures} log files left uncompressed");
+        bail!("{failures} log files left uncompressed");
     }
     Ok(())
 }
@@ -78,29 +82,72 @@ fn finished_days(directory: &Path, today: &str) -> Result<Vec<PathBuf>> {
 }
 
 /// Writes `path` gzipped beside it, then removes the plain file.  An
-/// existing archive is never replaced.
+/// existing archive is never replaced: if it already holds the same data,
+/// left by a run that stopped before removing the plain file or by a
+/// concurrent run, the plain file goes; otherwise both stay and this
+/// fails.
 fn compress(path: &Path) -> Result<()> {
     let mut compressed_name = path.file_name().context("no file name")?.to_owned();
     compressed_name.push(COMPRESSED_SUFFIX);
     let compressed = path.with_file_name(&compressed_name);
-    let mut partial_name = compressed_name;
-    partial_name.push(PARTIAL_SUFFIX);
-    let partial = path.with_file_name(partial_name);
-    let mut input = File::open(path).context("opening")?;
-    let output =
-        File::create(&partial).with_context(|| format!("creating {}", partial.display()))?;
+    if !compressed.exists() {
+        // Each run writes its own temporary file, so runs cannot truncate
+        // or remove each other's.
+        let mut partial_name = compressed_name;
+        partial_name.push(format!("{PARTIAL_SUFFIX}-{:016x}", rand::random::<u64>()));
+        let partial = path.with_file_name(partial_name);
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)
+            .with_context(|| format!("creating {}", partial.display()))?;
+        let written = write_archive(path, &mut output).and_then(|()| {
+            // Linking, unlike renaming, refuses to replace an archive.
+            match fs::hard_link(&partial, &compressed) {
+                Err(error) if error.kind() != ErrorKind::AlreadyExists => {
+                    Err(error).with_context(|| format!("creating {}", compressed.display()))
+                }
+                _ => Ok(()),
+            }
+        });
+        fs::remove_file(&partial).ok();
+        written?;
+    }
+    if !archive_matches(&compressed, path)? {
+        bail!("{} exists with other data; left both", compressed.display());
+    }
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != ErrorKind::NotFound => {
+            Err(error).context("removing the plain file")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Gzips `source` into `output`.
+fn write_archive(source: &Path, output: &mut File) -> Result<()> {
+    let mut input = File::open(source).context("opening")?;
     let mut encoder = GzEncoder::new(output, Compression::default());
     io::copy(&mut input, &mut encoder).context("compressing")?;
     encoder
         .finish()
         .and_then(|file| file.sync_all())
-        .context("finishing the archive")?;
-    // Linking, unlike renaming, refuses to replace an archive.
-    let published = fs::hard_link(&partial, &compressed)
-        .with_context(|| format!("creating {}", compressed.display()));
-    fs::remove_file(&partial).ok();
-    published?;
-    fs::remove_file(path).context("removing the plain file")
+        .context("finishing the archive")
+}
+
+/// Whether `archive` decompresses to exactly `source`.  A missing source
+/// counts as a match: another run already removed it.
+fn archive_matches(archive: &Path, source: &Path) -> Result<bool> {
+    let plain = match fs::read(source) {
+        Ok(plain) => plain,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error).context("reading the plain file"),
+    };
+    let mut unpacked = Vec::new();
+    GzDecoder::new(File::open(archive).with_context(|| format!("opening {}", archive.display()))?)
+        .read_to_end(&mut unpacked)
+        .with_context(|| format!("reading {}", archive.display()))?;
+    Ok(unpacked == plain)
 }
 
 /// Appends samples to the file for their day, switching at midnight UTC.
@@ -237,13 +284,51 @@ mod tests {
             .expect("gunzip");
         assert_eq!(text, "2026-10-10.jsonl\n");
         assert!(!finished[0].exists(), "the plain file goes");
-        // An existing archive is never replaced.
-        fs::write(&finished[0], "again\n").expect("rewrite");
+        // A run stopped after publishing leaves both; the next one finishes.
+        fs::write(&finished[0], "2026-10-10.jsonl\n").expect("restore");
+        compress(&finished[0]).expect("finish an interrupted run");
+        assert!(!finished[0].exists());
+        // An archive holding other data is never replaced.
+        fs::write(&finished[0], "different\n").expect("rewrite");
         assert!(compress(&finished[0]).is_err());
         assert!(
             finished[0].exists(),
             "the plain file stays when compressing fails"
         );
+        let leftovers = fs::read_dir(&directory)
+            .expect("list")
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.file_name().to_string_lossy().contains(".partial"))
+            })
+            .count();
+        assert_eq!(leftovers, 0, "no temporary archive is left");
         fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[test]
+    fn concurrent_runs_leave_one_good_archive() {
+        const RUNS: usize = 4;
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-concurrent-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let path = directory.join("2026-10-10.jsonl");
+        let text = "{\"sample\":1}\n".repeat(100_000);
+        fs::write(&path, &text).expect("write");
+        std::thread::scope(|scope| {
+            for _ in 0..RUNS {
+                // Losers may fail to read a source the winner removed.
+                scope.spawn(|| compress(&path).ok());
+            }
+        });
+        let mut unpacked = String::new();
+        GzDecoder::new(fs::File::open(directory.join("2026-10-10.jsonl.gz")).expect("archive"))
+            .read_to_string(&mut unpacked)
+            .expect("gunzip");
+        let plain_left = path.exists();
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert_eq!(unpacked, text);
+        assert!(!plain_left);
     }
 }

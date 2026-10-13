@@ -15,6 +15,8 @@ Group=jackerymon
 # package's tmpfiles entry makes the directory.
 # Daily sample files; the package's tmpfiles entry makes it at install.
 StateDirectory=jackerymon
+# As the tmpfiles entry has it; systemd resets the mode at start.
+StateDirectoryMode=0755
 # The socket, /run/jackerymon/<serial>.sock; the group may use it.
 RuntimeDirectory=jackerymon
 RuntimeDirectoryMode=0750
