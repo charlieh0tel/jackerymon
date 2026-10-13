@@ -2,6 +2,10 @@
 name = "jackerymon-cli"
 version = "0.1.0"
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Jackery Explorer monitor over BLE: TUI, daemon, metrics"
 
 [[bin]]
 name = "jackerymon"
@@ -13,13 +17,15 @@ anyhow = "1.0.104"
 axum = "0.8.9"
 base64 = "0.23.1"
 chrono = "0.4.45"
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 ecb = { version = "0.2.1", features = ["alloc"] }
 env_logger = "0.11.11"
+flate2 = "1.1.10"
 futures = "0.3.34"
 jackerymon = { version = "0.1.0", path = "../jackerymon" }
 libc = "0.2.190"
+log = "0.4.34"
 rand = "0.10.3"
 ratatui = "0.30.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "query", "rustls", "stream"] }
@@ -36,3 +42,30 @@ workspace = true
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["test-util"] }
+
+[package.metadata.deb]
+name = "jackerymon"
+maintainer = "Christopher Hoover <ch@murgatroid.com>"
+copyright = "2026, Christopher Hoover"
+license-file = ["../../LICENSE-MIT", "0"]
+extended-description = """\
+Talks to a Jackery Explorer power station over Bluetooth LE, without \
+Jackery's cloud: a live terminal view, settings, and a daemon that \
+serves Prometheus metrics, status, and control on a Unix socket."""
+section = "utils"
+priority = "optional"
+depends = "$auto, bluez"
+assets = [
+    ["target/release/jackerymon", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/jackerymon/", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/jackerymon/", "644"],
+    ["debian/sysusers.conf", "usr/lib/sysusers.d/jackerymon.conf", "644"],
+    ["debian/default", "etc/default/jackerymon", "644"],
+    ["debian/jackerymon-compress.service", "usr/lib/systemd/system/", "644"],
+    ["debian/jackerymon-compress.timer", "usr/lib/systemd/system/", "644"],
+]
+maintainer-scripts = "debian/"
+# Installed disabled: the daemon needs a key in /etc/jackerymon first.
+# Its unit pulls in the compress timer, so that needs no enabling.
+systemd-units = { enable = false, start = false }
+

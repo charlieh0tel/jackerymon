@@ -1,0 +1,22 @@
+name: Build Debian Package
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    uses: charlieh0tel/deb-workflows/.github/workflows/rust-build-deb.yml@v1
+    with:
+      package: jackerymon-cli
+      build-deps: "libdbus-1-dev pkg-config"
+      # See ci.yml.
+      audit-args: "--ignore RUSTSEC-2023-0071"
+    secrets: inherit

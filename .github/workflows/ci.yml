@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  rust-ci:
+    uses: charlieh0tel/deb-workflows/.github/workflows/rust-ci.yml@v1
+    with:
+      build-deps: "libdbus-1-dev pkg-config"
+      check-args: "--workspace --all-targets"
+      # RUSTSEC-2023-0071 (rsa, Marvin timing attack) concerns private-key
+      # operations; `jackerymon key` only encrypts with the app's public
+      # key.  See PLAN.md.
+      audit-args: "--ignore RUSTSEC-2023-0071"

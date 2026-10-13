@@ -2,6 +2,10 @@
 name = "jackerymon"
 version = "0.1.0"
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Monitor and control Jackery Explorer power stations over BLE"
 
 [lints]
 workspace = true

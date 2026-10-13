@@ -1,0 +1,6 @@
+[Unit]
+Description=Compress finished jackerymon sample logs daily
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 UTC
+Persistent=true

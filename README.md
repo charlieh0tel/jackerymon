@@ -76,17 +76,16 @@ sets the filter.
 
 ## Daemon
 
-`jackerymon daemon` holds the connection.  It serves the full API on a
-Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (under systemd,
-`/run/jackerymon/`), and a read-only subset over TCP on
-`127.0.0.1:9888` (`--listen`) for Prometheus:
+`jackerymon daemon` holds the connection and serves the full API on a
+Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
+`/run/jackerymon/`), and the read-only routes over TCP for Prometheus:
 
 | Route | Gives | TCP |
 |---|---|---|
 | `GET /status` | link state, counters, latest sample | yes |
 | `GET /metrics` | Prometheus `jackery_*` metrics | yes |
 | `GET /events` | server-sent events: current state, then changes | yes |
-| `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | with `--tcp-control` |
+| `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | only with `--tcp-control` |
 
 ```sh
 curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
@@ -94,15 +93,27 @@ curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
     http://localhost/settings
 ```
 
-Setting keys and values are in `docs/protocol.md`.  Emergency charging
-needs `?confirm=true`.  A setting not sent within 60 s is dropped.
-`/metrics` omits readings older than 60 s.  `--log-dir` writes a
-JSON-lines file per UTC day, about 10 MB.
+Setting keys and values are in `docs/protocol.md`; other options are in
+`jackerymon daemon --help`.  TCP has no authentication, so with
+`--tcp-control` anyone who reaches it, including a web page through DNS
+rebinding, can switch outputs.
 
-The socket's directory decides who may use it: a user's daemon is
-private; the system daemon's, for now, is open to every local user.
-TCP has no authentication; `--tcp-control` lets anyone who reaches it,
-including a web page through DNS rebinding, switch outputs.
+## Install
 
-`contrib/systemd/` has an untested service unit and a rule that deletes
-logs after 30 days.
+Releases carry `.deb` packages for amd64 and arm64.  The package adds a
+`jackerymon` user and group and a `jackerymon` service, installed
+disabled.  To run the daemon:
+
+```sh
+sudo apt install ./jackerymon_*.deb
+jackerymon key                       # if you have no key yet
+sudo install -m 0640 -g jackerymon ~/.config/jackerymon/<serial>.json /etc/jackerymon/
+sudo usermod -aG jackerymon $USER    # control through the socket; log in again
+sudo systemctl enable --now jackerymon
+```
+
+Daemon options are in `/etc/default/jackerymon`.  Samples go to
+`/var/lib/jackerymon/`, one file per day; a daily timer gzips finished
+days, and nothing is deleted.
+
+To build the package: `cargo deb -p jackerymon-cli`.

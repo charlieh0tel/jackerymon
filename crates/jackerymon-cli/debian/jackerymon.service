@@ -1,0 +1,34 @@
+# Runs `jackerymon daemon` for the one unit whose key is in
+# /etc/jackerymon.  Install the key, then `systemctl enable --now
+# jackerymon`; see README.md, "Install".
+[Unit]
+Description=Jackery BLE monitor
+Wants=bluetooth.target
+After=bluetooth.target
+# Compresses finished daily logs while the daemon is in use.
+Wants=jackerymon-compress.timer
+
+[Service]
+User=jackerymon
+Group=jackerymon
+# Keys: /etc/jackerymon/<serial>.json, readable by the group; the
+# package's tmpfiles entry makes the directory.
+# Daily sample files; the package's tmpfiles entry makes it at install.
+StateDirectory=jackerymon
+# The socket, /run/jackerymon/<serial>.sock; the group may use it.
+RuntimeDirectory=jackerymon
+RuntimeDirectoryMode=0750
+# JACKERYMON_LISTEN and JACKERYMON_TCP_CONTROL.
+EnvironmentFile=-/etc/default/jackerymon
+ExecStart=/usr/bin/jackerymon daemon --log-dir /var/lib/jackerymon
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+# The per-unit lock, shared with interactive commands.
+ReadWritePaths=/run/lock
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

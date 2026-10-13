@@ -4,6 +4,9 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Christopher Hoover <ch@murgatroid.com>"]
+repository = "https://github.com/charlieh0tel/jackerymon"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

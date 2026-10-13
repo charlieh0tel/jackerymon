@@ -1,0 +1,5 @@
+# Keys for the daemon: /etc/jackerymon/<serial>.json, readable by the
+# jackerymon group.
+d /etc/jackerymon 0750 root jackerymon -
+# The daemon's daily sample files, kept forever.
+d /var/lib/jackerymon 0750 jackerymon jackerymon -

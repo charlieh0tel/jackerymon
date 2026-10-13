@@ -30,9 +30,9 @@ once the Rust key fetch matched it (it remains in git history).
   SERIAL` chooses, and is optional when one key is present.  The file
   format is the PoC's, so keys it wrote still load.
 - **Several units: one daemon per unit.**  Each instance owns one unit's
-  connection and port; one adapter can hold several connections.  A
-  systemd template (`jackerymon@<serial>`) comes with the always-on
-  host.
+  connection and port; one adapter can hold several connections.  The
+  package's unit serves one unit; a template (`jackerymon@<serial>`)
+  waits for a second unit.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty
   random-type advertisement can take over its BlueZ object and hide it
   (`FINDINGS.md`, Duplicate advertisement).  Recovery needs BlueZ
@@ -104,19 +104,46 @@ once the Rust key fetch matched it (it remains in git history).
   body; answers once status confirms it, within 60 s including
   queueing).  TCP, `127.0.0.1:9888` by default, serves the read-only
   routes unless `--tcp-control`.  A daemon refuses to start while
-  another answers on its socket, and replaces a dead one's leftover.  Optional `--log-dir` writes daily
-  JSON-lines files; pruning is left to tmpfiles or logrotate.  Readings
+  another answers on its socket, and replaces a dead one's leftover.
+  Optional `--log-dir` writes daily JSON-lines files.  Readings
   older than 60 s are left out of `/metrics`.  When polling ends, by
   signal or fatal error, HTTP stops too and the daemon exits with the
   polling result, so a supervisor sees failures.
 - **Control goes over the socket; TCP is read-only by default.**  The
-  socket's directory decides who may control the unit: a user's daemon
-  is private; the system daemon's socket is open to every local user
-  until packaging brings groups.  TCP has no token, peer, or `Host`
+  socket is mode 0660 and its directory decides the rest: a user's
+  daemon is private; the system daemon's admits the `jackerymon` group.
+  TCP has no token, peer, or `Host`
   check, so `--tcp-control` brings back the accepted risks: DNS
   rebinding lets a web page on the daemon's host change settings, and a
   remote listener exposes control.  Without it, TCP exposes telemetry
   only.
+
+### Packaging
+
+- **A `.deb` built by `cargo-deb`,** through the shared
+  `charlieh0tel/deb-workflows` (`rust-ci.yml`, `rust-build-deb.yml`):
+  amd64 and arm64, glibc of Ubuntu 22.04 so Debian bookworm installs it.
+  A `v*` tag releases.  The toolchain is pinned in `rust-toolchain.toml`.
+- **License: MIT OR Apache-2.0.**
+- **The daemon runs as system user and group `jackerymon`,** created by
+  sysusers.d (`postinst` applies it; cargo-deb does not).  Group members
+  may use the socket in `/run/jackerymon` and read keys in
+  `/etc/jackerymon`.  The unit is installed disabled: it needs a key
+  first.
+- **`/etc/default/jackerymon` sets TCP:** `JACKERYMON_LISTEN` and
+  `JACKERYMON_TCP_CONTROL`, which the daemon also reads from its
+  environment.  A conffile, so edits survive upgrades.
+- **Sample logs are kept forever, gzipped once a day ends,** in
+  `/var/lib/jackerymon` (data, not disposable logs).  The daemon
+  only appends; `jackerymon compress-logs`, run daily by a timer that
+  the daemon's unit pulls in, compresses finished days (about 1 MB a day
+  compressed, 10 MB plain).  Nothing deletes them.
+- **cargo-deb applies one enable/start setting to every unit in a
+  package,** so the timer is not a separately enabled unit; the daemon's
+  `Wants=` starts it.
+- **RUSTSEC-2023-0071 (`rsa`, Marvin timing attack) is accepted.**  It
+  concerns private-key operations; `jackerymon key` only encrypts with
+  the app's public key.  CI ignores that advisory by ID.
 
 ## Next steps and open questions
 
@@ -124,9 +151,7 @@ once the Rust key fetch matched it (it remains in git history).
    and whether polling keeps the radios on.  The radios turn off five
    minutes after power-on if nothing connects (`FINDINGS.md`, Radio
    controls); confirm that applies to this unit.
-2. On the always-on host: rework the systemd unit (`DynamicUser=`, the
-   key through `LoadCredential=`, no `bluetooth` group, which BlueZ's
-   default D-Bus policy does not need) and test whether the daemon
+2. Install the package on the always-on host; test whether the daemon
    survives a bluetoothd restart and host sleep.
 3. Where Prometheus runs, and so whether the daemon binds beyond
    localhost.

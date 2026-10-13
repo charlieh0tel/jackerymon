@@ -1,0 +1,12 @@
+# Settings for the jackerymon daemon (jackerymon.service).  Restart it
+# after a change: systemctl restart jackerymon
+
+# Address for the read-only HTTP routes: metrics, status, and events.
+# Use 0.0.0.0:9888 to let Prometheus on another machine scrape it.
+#JACKERYMON_LISTEN=127.0.0.1:9888
+
+# Also accept settings over TCP.  TCP has no authentication: anyone who
+# can reach the address, including a web page through DNS rebinding,
+# can switch outputs.  Members of the jackerymon group always have
+# control through the socket.
+#JACKERYMON_TCP_CONTROL=false

@@ -35,6 +35,8 @@ const SOCKET_EXTENSION: &str = "sock";
 const LOCK_DIRECTORY: &str = "/run/lock";
 const LOCK_PREFIX: &str = "jackerymon-";
 const LOCK_EXTENSION: &str = "lock";
+/// Owner and group may connect.  A user's runtime directory is private;
+/// the system daemon's admits the `jackerymon` group.
 const SOCKET_MODE: u32 = 0o660;
 const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
 

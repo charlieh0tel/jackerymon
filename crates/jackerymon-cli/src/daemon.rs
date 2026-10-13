@@ -5,7 +5,7 @@
 //! use it.  TCP, for Prometheus, is read-only unless `--tcp-control`.
 
 mod http;
-mod log;
+pub(crate) mod log;
 mod metrics;
 mod state;
 
@@ -19,6 +19,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use ::log::error;
+use ::log::info;
+use ::log::warn;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
@@ -56,12 +59,12 @@ pub(crate) struct DaemonArgs {
     #[command(flatten)]
     connection: ConnectionArgs,
     /// TCP address for the read-only routes: metrics, status, events.
-    #[arg(long, default_value = DEFAULT_LISTEN)]
+    #[arg(long, env = "JACKERYMON_LISTEN", default_value = DEFAULT_LISTEN)]
     listen: SocketAddr,
     /// Also accept settings over TCP.  TCP has no authentication; anyone
     /// who can reach it, including web pages through DNS rebinding, can
     /// switch outputs.
-    #[arg(long)]
+    #[arg(long, env = "JACKERYMON_TCP_CONTROL")]
     tcp_control: bool,
     /// Unix socket for the full API; default
     /// `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock`, or systemd's runtime
@@ -138,16 +141,23 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
                 shutdown(),
                 move |event| {
                     let update = Update::from(event);
+                    match &update {
+                        Update::Connected { connection } => {
+                            info!("connected (connection {connection})")
+                        }
+                        Update::Lost { error, consecutive } => {
+                            warn!("BLE failure {consecutive}: {error}; reconnecting");
+                        }
+                        Update::Sample(_) => {}
+                    }
                     if let (Some(log), Update::Sample(record)) = (&mut log, &update) {
                         match (log.write(record), log_failing) {
                             (Err(error), false) => {
-                                eprintln!(
-                                    "sample log: {error:#}; reporting again once it recovers"
-                                );
+                                error!("sample log: {error:#}; reporting again once it recovers");
                                 log_failing = true;
                             }
                             (Ok(()), true) => {
-                                eprintln!("sample log: writing again");
+                                info!("sample log: writing again");
                                 log_failing = false;
                             }
                             _ => {}
@@ -167,7 +177,7 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
             .context("polling failed")
         }
     };
-    eprintln!(
+    info!(
         "listening on {} and http://{} ({})",
         socket_path.display(),
         arguments.listen,
@@ -226,7 +236,7 @@ async fn serve(
                 shared.stopped().await;
                 sleep(SHUTDOWN_GRACE).await;
             } => {
-                eprintln!("dropping requests still open {SHUTDOWN_GRACE:?} after polling ended");
+                warn!("dropping requests still open {SHUTDOWN_GRACE:?} after polling ended");
                 (Ok(()), Ok(()))
             }
         }

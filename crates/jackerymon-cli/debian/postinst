@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+# cargo-deb installs sysusers files but does not apply them.
+if [ "$1" = "configure" ] && command -v systemd-sysusers >/dev/null; then
+	systemd-sysusers jackerymon.conf
+fi
+#DEBHELPER#
