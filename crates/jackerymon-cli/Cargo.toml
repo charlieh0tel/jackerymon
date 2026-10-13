@@ -1,6 +1,6 @@
 [package]
 name = "jackerymon-cli"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -23,7 +23,7 @@ ecb = { version = "0.2.1", features = ["alloc"] }
 env_logger = "0.11.11"
 flate2 = "1.1.10"
 futures = "0.3.34"
-jackerymon = { version = "0.1.3", path = "../jackerymon" }
+jackerymon = { version = "0.1.4", path = "../jackerymon" }
 libc = "0.2.190"
 log = "0.4.34"
 rand = "0.10.3"
