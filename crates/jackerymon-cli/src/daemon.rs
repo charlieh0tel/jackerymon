@@ -276,6 +276,9 @@ mod tests {
     use super::SHUTDOWN_GRACE;
     use super::Shared;
     use super::serve;
+    use jackerymon::control::Setting;
+    use jackerymon::status::LightMode;
+
     use crate::daemon_client::DaemonClient;
     use crate::daemon_client::Endpoint;
     use crate::daemon_client::SOCKET_BASE;
@@ -393,6 +396,53 @@ mod tests {
             .expect("serving ends despite the stalled request")
             .expect("task");
         assert!(result.is_err());
+        drop(claimed);
+        fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn a_client_notices_another_unit_at_its_address() {
+        /// Serves `serial` on `path` until `stop` fires.
+        async fn daemon_for(
+            serial: &str,
+            path: &std::path::Path,
+        ) -> (
+            oneshot::Sender<()>,
+            tokio::task::JoinHandle<anyhow::Result<()>>,
+            runtime::Claimed,
+        ) {
+            let (shared, _requests) = Shared::new(serial.to_owned());
+            let (socket, claimed) = runtime::claim(path).expect("socket");
+            let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let (stop, stopped) = oneshot::channel::<()>();
+            let listeners = Listeners {
+                socket,
+                tcp,
+                tcp_control: false,
+            };
+            let served = tokio::spawn(serve(shared, listeners, async move {
+                stopped.await.ok();
+                Ok(())
+            }));
+            (stop, served, claimed)
+        }
+        let path = socket_path("swap");
+        let endpoint = Endpoint::Unix(path.clone());
+        let (stop, served, claimed) = daemon_for("111", &path).await;
+        let (client, _) = DaemonClient::connect(&endpoint, None)
+            .await
+            .expect("connect");
+        stop.send(()).expect("stop");
+        served.await.expect("task").expect("served");
+        drop(claimed);
+        let (stop, served, claimed) = daemon_for("222", &path).await;
+        let refused = client
+            .post_setting(Setting::Light(LightMode::Low), false)
+            .await
+            .expect_err("another unit's daemon");
+        assert!(refused.contains("now owns unit 222, not 111"), "{refused}");
+        stop.send(()).expect("stop");
+        served.await.expect("task").expect("served");
         drop(claimed);
         fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
     }

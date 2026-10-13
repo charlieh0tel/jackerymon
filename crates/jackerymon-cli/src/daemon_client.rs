@@ -98,6 +98,10 @@ pub(crate) struct DaemonClient {
     /// Reads on the event stream time out, so a dead connection is noticed;
     /// a setting may take longer than that, so it uses `client`.
     events: reqwest::Client,
+    /// The unit the daemon owned when this client connected; checked again
+    /// before each reconnect and setting, since another daemon may since
+    /// have taken the address.
+    unit: Option<String>,
 }
 
 impl DaemonClient {
@@ -114,6 +118,7 @@ impl DaemonClient {
             }
         };
         Ok(Self {
+            unit: None,
             base,
             client: builder().build().context("building the daemon client")?,
             events: builder()
@@ -129,14 +134,30 @@ impl DaemonClient {
         endpoint: &Endpoint,
         expected: Option<&str>,
     ) -> Result<(Self, String)> {
-        let client = Self::new(endpoint)?;
+        let mut client = Self::new(endpoint)?;
         let serial = client.serial().await?;
         if let Some(expected) = expected
             && serial != expected
         {
             bail!("the daemon at {endpoint} owns unit {serial}, not {expected}");
         }
+        client.unit = Some(serial.clone());
         Ok((client, serial))
+    }
+
+    /// Fails if the daemon now owns a unit other than the one it owned at
+    /// connect.
+    async fn same_unit(&self) -> Result<()> {
+        if let Some(unit) = &self.unit {
+            let serial = self.serial().await?;
+            if &serial != unit {
+                bail!(
+                    "the daemon at {} now owns unit {serial}, not {unit}",
+                    self.base
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The serial of the unit the daemon owns.
@@ -165,6 +186,9 @@ impl DaemonClient {
         sender: &mpsc::UnboundedSender<Update>,
         consecutive: &mut u32,
     ) -> anyhow::Error {
+        if let Err(error) = self.same_unit().await {
+            return error;
+        }
         let response = match self
             .events
             .get(format!("{}/events", self.base))
@@ -197,6 +221,9 @@ impl DaemonClient {
     }
 
     pub(crate) async fn post_setting(&self, setting: Setting, confirm: bool) -> Result<(), String> {
+        self.same_unit()
+            .await
+            .map_err(|error| format!("{setting} not sent: {error:#}"))?;
         let response = self
             .client
             .post(format!("{}/settings?confirm={confirm}", self.base))
@@ -222,7 +249,7 @@ impl DaemonClient {
 fn receive(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<Update>, anyhow::Error> {
     // Dropping CR accepts CRLF line endings; lone CR is unused.
     buffer.extend(chunk.iter().filter(|&&byte| byte != CARRIAGE_RETURN));
-    let updates = drain_events(buffer);
+    let updates = drain_events(buffer)?;
     if buffer.len() > MAX_EVENT_BYTES {
         return Err(anyhow!("daemon event over {MAX_EVENT_BYTES} bytes"));
     }
@@ -231,16 +258,20 @@ fn receive(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<Update>, anyhow::Er
 
 /// Takes the complete events off the front of `buffer`, leaving a partial
 /// one.  Splitting on bytes keeps a character cut between chunks whole.
-fn drain_events(buffer: &mut Vec<u8>) -> Vec<Update> {
+/// Fails on an event over [`MAX_EVENT_BYTES`].
+fn drain_events(buffer: &mut Vec<u8>) -> Result<Vec<Update>> {
     let mut updates = Vec::new();
     while let Some(end) = buffer
         .windows(EVENT_SEPARATOR.len())
         .position(|window| window == EVENT_SEPARATOR)
     {
+        if end > MAX_EVENT_BYTES {
+            bail!("daemon event over {MAX_EVENT_BYTES} bytes");
+        }
         let event: Vec<u8> = buffer.drain(..end + EVENT_SEPARATOR.len()).collect();
         updates.extend(parse_event(&String::from_utf8_lossy(&event)));
     }
-    updates
+    Ok(updates)
 }
 
 /// The updates in one server-sent event; malformed data is skipped.
@@ -274,10 +305,10 @@ mod tests {
         let bytes = event.as_bytes();
         let split = event.find('…').expect("ellipsis") + 1;
         let mut buffer = bytes[..split].to_vec();
-        assert!(drain_events(&mut buffer).is_empty());
+        assert!(drain_events(&mut buffer).expect("partial").is_empty());
         buffer.extend_from_slice(&bytes[split..]);
         assert_eq!(
-            drain_events(&mut buffer),
+            drain_events(&mut buffer).expect("event"),
             [Update::Lost {
                 error: "searching…".to_owned(),
                 consecutive: 1
@@ -297,5 +328,9 @@ mod tests {
         assert_eq!(updates, [Update::Connected { connection: 1 }]);
         let endless = vec![b'x'; MAX_EVENT_BYTES + 1];
         assert!(receive(&mut buffer, &endless).is_err());
+        // An oversized event arriving whole is refused too.
+        let mut whole = vec![b'x'; MAX_EVENT_BYTES + 1];
+        whole.extend_from_slice(b"\n\n");
+        assert!(receive(&mut Vec::new(), &whole).is_err());
     }
 }
