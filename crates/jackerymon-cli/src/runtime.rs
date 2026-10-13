@@ -345,15 +345,14 @@ mod tests {
         drop(lock_in(&directory, "111").expect("lock"));
         let mode = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
         assert_eq!(mode, 0o644, "a strict umask's lock is opened up");
-        let fifo = directory.join("jackerymon-222.lock");
-        let made = std::process::Command::new("mkfifo")
-            .arg(&fifo)
-            .status()
-            .expect("mkfifo");
-        assert!(made.success());
+        // A socket stands in for any non-regular file; making a FIFO needs
+        // `unsafe` or a child process, and a child would inherit other
+        // tests' locks and sockets for a moment.
+        let _socket = std::os::unix::net::UnixListener::bind(directory.join("jackerymon-222.lock"))
+            .expect("socket file");
         assert!(
             lock_in(&directory, "222").is_err(),
-            "a FIFO is refused, not waited on"
+            "a non-regular file is refused"
         );
         fs::remove_dir_all(&directory).expect("cleanup");
     }
