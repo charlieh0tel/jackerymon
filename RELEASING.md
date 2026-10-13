@@ -20,7 +20,9 @@ publishes a GitHub Release (`.github/workflows/build-deb.yml`); a failed
    ```
 
 5. `git tag -a vX.Y.Z -m "jackerymon X.Y.Z" && git push origin vX.Y.Z`;
-   confirm both `.deb`s on the release.
+   confirm both `.deb`s on the release.  The release triggers an
+   [apt-repo](https://github.com/charlieh0tel/apt-repo) rebuild
+   (`APT_REPO_TOKEN`); otherwise its daily run picks it up.
 
 Never re-tag a release someone may have installed; fix forward with a
 new patch version.  A broken release nobody consumed may be deleted

@@ -20,3 +20,16 @@ jobs:
       # See ci.yml.
       audit-args: "--ignore RUSTSEC-2023-0071"
     secrets: inherit
+
+  trigger-apt-repo:
+    needs: build-deb
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      # workflow_dispatch, not repository_dispatch: the token then needs
+      # Actions: write on apt-repo instead of Contents: write, which could
+      # push a commit to the workflow that runs with the GPG signing key.
+      - name: Trigger APT repo rebuild
+        env:
+          GH_TOKEN: ${{ secrets.APT_REPO_TOKEN }}
+        run: gh workflow run update-repo.yml -R charlieh0tel/apt-repo
