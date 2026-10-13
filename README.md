@@ -85,6 +85,7 @@ Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
 | `GET /status` | link state, counters, latest sample | yes |
 | `GET /metrics` | Prometheus `jackery_*` metrics | yes |
 | `GET /events` | server-sent events: current state, then changes | yes |
+| `GET /history?since=…&until=…` | logged samples, JSON lines; needs `--log-dir` | yes |
 | `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | only with `--tcp-control` |
 
 ```sh

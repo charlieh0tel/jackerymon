@@ -6,6 +6,8 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
@@ -15,11 +17,13 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use serde::Deserialize;
 
 use crate::record::SampleRecord;
 
@@ -151,6 +155,60 @@ fn archive_matches(archive: &Path, source: &Path) -> Result<bool> {
     Ok(unpacked == plain)
 }
 
+/// Calls `emit` with each logged sample line timestamped in
+/// `since..=until`, in order, from the plain or gzipped file of each day in
+/// that range.  `emit` returning false stops the read.  A line that does
+/// not parse, such as one the daemon is still writing, is skipped.
+pub(super) fn read_history(
+    directory: &Path,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+    mut emit: impl FnMut(&str) -> bool,
+) -> Result<()> {
+    let mut day = since.date_naive();
+    while day <= until.date_naive() {
+        let plain = log_path(directory, &day.format(DATE_FORMAT).to_string());
+        let mut compressed_name = plain.file_name().context("no file name")?.to_owned();
+        compressed_name.push(COMPRESSED_SUFFIX);
+        let compressed = plain.with_file_name(compressed_name);
+        // The plain file while it exists: it is complete, and an archive
+        // beside it may still be being written.
+        let reader: Option<Box<dyn BufRead>> = match File::open(&plain) {
+            Ok(file) => Some(Box::new(BufReader::new(file))),
+            Err(error) if error.kind() == ErrorKind::NotFound => match File::open(&compressed) {
+                Ok(file) => Some(Box::new(BufReader::new(GzDecoder::new(file)))),
+                Err(error) if error.kind() == ErrorKind::NotFound => None,
+                Err(error) => {
+                    return Err(error).with_context(|| format!("opening {}", compressed.display()));
+                }
+            },
+            Err(error) => {
+                return Err(error).with_context(|| format!("opening {}", plain.display()));
+            }
+        };
+        for line in reader.into_iter().flat_map(BufRead::lines) {
+            let line = line.context("reading the sample log")?;
+            let Ok(stamp) = serde_json::from_str::<Stamp>(&line) else {
+                continue;
+            };
+            let Ok(taken) = DateTime::parse_from_rfc3339(&stamp.timestamp) else {
+                continue;
+            };
+            if (since..=until).contains(&taken.with_timezone(&Utc)) && !emit(&line) {
+                return Ok(());
+            }
+        }
+        day = day.succ_opt().context("date out of range")?;
+    }
+    Ok(())
+}
+
+/// The one field `read_history` needs from a sample line.
+#[derive(Deserialize)]
+struct Stamp {
+    timestamp: String,
+}
+
 /// Appends samples to the file for their day, switching at midnight UTC.
 pub(super) struct SampleLog {
     directory: PathBuf,
@@ -187,9 +245,14 @@ impl SampleLog {
     }
 }
 
+/// The plain log file for `day`, `YYYY-MM-DD`.
+fn log_path(directory: &Path, day: &str) -> PathBuf {
+    directory.join(day).with_extension(LOG_EXTENSION)
+}
+
 /// Opens the file for `day` to append to.
 fn open(directory: &Path, day: &str) -> Result<File> {
-    let path = directory.join(day).with_extension(LOG_EXTENSION);
+    let path = log_path(directory, day);
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -210,6 +273,7 @@ mod tests {
     use super::SampleLog;
     use super::compress;
     use super::finished_days;
+    use super::read_history;
     use crate::record::SampleRecord;
 
     fn record(timestamp: &str, sample: u64) -> SampleRecord {
@@ -331,5 +395,73 @@ mod tests {
         fs::remove_dir_all(&directory).expect("cleanup");
         assert_eq!(unpacked, text);
         assert!(!plain_left);
+    }
+
+    #[test]
+    fn history_spans_plain_and_gzipped_days() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-history-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let line = |timestamp: &str, sample| record(timestamp, sample).to_string();
+        let first_day = [
+            line("2026-10-10T23:00:00.000000+00:00", 1),
+            line("2026-10-10T23:59:59.000000+00:00", 2),
+        ]
+        .join("\n");
+        let mut encoder = flate2::write::GzEncoder::new(
+            fs::File::create(directory.join("2026-10-10.jsonl.gz")).expect("archive"),
+            flate2::Compression::default(),
+        );
+        std::io::Write::write_all(&mut encoder, format!("{first_day}\n").as_bytes()).expect("gzip");
+        encoder.finish().expect("finish");
+        let second_day = [
+            line("2026-10-11T00:00:04.000000+00:00", 3),
+            "{\"timestamp\":\"half a li".to_owned(),
+            line("2026-10-11T12:00:00.000000+00:00", 4),
+        ]
+        .join("\n");
+        fs::write(
+            directory.join("2026-10-11.jsonl"),
+            format!("{second_day}\n"),
+        )
+        .expect("plain");
+        let at = |text: &str| {
+            chrono::DateTime::parse_from_rfc3339(text)
+                .expect("time")
+                .to_utc()
+        };
+        let mut samples = Vec::new();
+        read_history(
+            &directory,
+            at("2026-10-10T23:30:00Z"),
+            at("2026-10-11T06:00:00Z"),
+            |line| {
+                samples.push(
+                    serde_json::from_str::<SampleRecord>(line)
+                        .expect("record")
+                        .sample,
+                );
+                true
+            },
+        )
+        .expect("read");
+        let mut first_only = 0;
+        read_history(
+            &directory,
+            at("2026-10-10T00:00:00Z"),
+            at("2026-10-12T00:00:00Z"),
+            |_| {
+                first_only += 1;
+                false
+            },
+        )
+        .expect("read");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert_eq!(
+            samples,
+            [2, 3],
+            "in range, across both days, partial line skipped"
+        );
+        assert_eq!(first_only, 1, "emit returning false stops the read");
     }
 }

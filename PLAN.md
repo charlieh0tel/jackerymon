@@ -100,7 +100,10 @@ once the Rust key fetch matched it (it remains in git history).
 - **Daemon.**  Owns the connection and retries forever.  The full API is
   on a Unix socket per unit, `<runtime directory>/jackerymon/<serial>.sock`:
   `GET /metrics` (Prometheus), `GET /status`, `GET /events` (server-sent
-  events, current state first), `POST /settings` (the unit's one-key
+  events, current state first), `GET /history` (logged samples between
+  two RFC 3339 times, streamed as JSON lines from the daily files,
+  gzipped or not; the TUI fetches its chart window from it), `POST
+  /settings` (the unit's one-key
   body; answers once status confirms it, within 60 s including
   queueing).  TCP, `127.0.0.1:9888` by default, serves the read-only
   routes unless `--tcp-control`.  A daemon refuses to start while

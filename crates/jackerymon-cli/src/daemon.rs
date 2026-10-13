@@ -84,11 +84,16 @@ struct Shared {
     commands: mpsc::Sender<ControlRequest>,
     /// Set once polling has ended, for any reason; HTTP then winds down.
     stopping: watch::Sender<bool>,
+    /// `--log-dir`, which `/history` reads; `None` without one.
+    log_dir: Option<PathBuf>,
 }
 
 impl Shared {
     /// The shared state and the receiving end of its commands.
-    fn new(serial: String) -> (Arc<Self>, mpsc::Receiver<ControlRequest>) {
+    fn new(
+        serial: String,
+        log_dir: Option<PathBuf>,
+    ) -> (Arc<Self>, mpsc::Receiver<ControlRequest>) {
         let (updates, _) = broadcast::channel(EVENT_BUFFER);
         let (commands, requests) = mpsc::channel(COMMAND_BUFFER);
         let shared = Self {
@@ -96,6 +101,7 @@ impl Shared {
             updates,
             commands,
             stopping: watch::Sender::new(false),
+            log_dir,
         };
         (Arc::new(shared), requests)
     }
@@ -123,7 +129,7 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
     let listener = TcpListener::bind(arguments.listen)
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;
-    let (shared, requests) = Shared::new(key_file.serial.to_string());
+    let (shared, requests) = Shared::new(key_file.serial.to_string(), arguments.log_dir.clone());
     let mut log = arguments
         .log_dir
         .map(SampleLog::new)
@@ -297,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn polling_failure_ends_serving_despite_events_clients() {
-        let (shared, _requests) = Shared::new("123456789".to_owned());
+        let (shared, _requests) = Shared::new("123456789".to_owned(), None);
         let path = socket_path("failure");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -368,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_never_finished_does_not_hold_shutdown() {
-        let (shared, _requests) = Shared::new("123456789".to_owned());
+        let (shared, _requests) = Shared::new("123456789".to_owned(), None);
         let path = socket_path("stalled");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -412,7 +418,7 @@ mod tests {
             tokio::task::JoinHandle<anyhow::Result<()>>,
             runtime::Claimed,
         ) {
-            let (shared, _requests) = Shared::new(serial.to_owned());
+            let (shared, _requests) = Shared::new(serial.to_owned(), None);
             let (socket, claimed) = runtime::claim(path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let (stop, stopped) = oneshot::channel::<()>();
@@ -446,5 +452,56 @@ mod tests {
         served.await.expect("task").expect("served");
         drop(claimed);
         fs::remove_dir_all(path.parent().expect("directory")).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn history_streams_logged_samples_over_tcp() {
+        let directory = socket_path("history")
+            .parent()
+            .expect("directory")
+            .to_owned();
+        fs::create_dir_all(&directory).expect("directory");
+        let line = "{\"timestamp\":\"2026-10-11T12:00:00.000000+00:00\",\"sample\":7,\"connection\":1,\"transport_failures\":0,\"query_ms\":1.0,\"status\":{}}";
+        fs::write(directory.join("2026-10-11.jsonl"), format!("{line}\n")).expect("log");
+        for (log_dir, query, expected) in [
+            (
+                Some(directory.clone()),
+                "since=2026-10-11T00:00:00Z",
+                StatusCode::OK,
+            ),
+            (None, "since=2026-10-11T00:00:00Z", StatusCode::NOT_FOUND),
+            (
+                Some(directory.clone()),
+                "since=yesterday",
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            let (shared, _requests) = Shared::new("123456789".to_owned(), log_dir);
+            let path = directory.join("123456789.sock");
+            let (socket, claimed) = runtime::claim(&path).expect("socket");
+            let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let base = format!("http://{}", tcp.local_addr().expect("address"));
+            let (stop, stopped) = oneshot::channel::<()>();
+            let listeners = Listeners {
+                socket,
+                tcp,
+                tcp_control: false,
+            };
+            let served = tokio::spawn(serve(shared, listeners, async move {
+                stopped.await.ok();
+                Ok(())
+            }));
+            let response = reqwest::get(format!("{base}/history?{query}"))
+                .await
+                .expect("history");
+            assert_eq!(response.status(), expected, "{query}");
+            if expected == StatusCode::OK {
+                assert_eq!(response.text().await.expect("body"), format!("{line}\n"));
+            }
+            stop.send(()).expect("stop");
+            served.await.expect("task").expect("served");
+            drop(claimed);
+        }
+        fs::remove_dir_all(&directory).expect("cleanup");
     }
 }

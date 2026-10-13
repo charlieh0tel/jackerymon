@@ -8,9 +8,13 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
+use chrono::DateTime;
+use chrono::SecondsFormat;
+use chrono::Utc;
 use clap::Args;
 use futures::StreamExt;
 use jackerymon::control::Setting;
+use reqwest::StatusCode;
 use tokio::sync::mpsc;
 
 use crate::daemon::EVENT_KEEP_ALIVE;
@@ -19,6 +23,8 @@ use crate::runtime;
 
 /// How long to wait for the daemon's status at startup.
 const DAEMON_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long to wait for history at startup.
+const DAEMON_HISTORY_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long to wait for a setting: a little over the daemon's own limit,
 /// so its answer arrives first.
 const DAEMON_SETTING_TIMEOUT: Duration = Duration::from_secs(70);
@@ -218,6 +224,34 @@ impl DaemonClient {
             }
         }
         anyhow!("event stream ended")
+    }
+
+    /// Logged samples since `since`, oldest first; none when the daemon
+    /// keeps no log.
+    pub(crate) async fn history(&self, since: DateTime<Utc>) -> Result<Vec<Update>> {
+        let since = since.to_rfc3339_opts(SecondsFormat::Micros, true);
+        let response = self
+            .client
+            .get(format!("{}/history", self.base))
+            .query(&[("since", since)])
+            .timeout(DAEMON_HISTORY_TIMEOUT)
+            .send()
+            .await
+            .context("asking the daemon for history")?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        let text = response
+            .error_for_status()
+            .context("asking the daemon for history")?
+            .text()
+            .await
+            .context("reading the daemon's history")?;
+        Ok(text
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .map(Update::Sample)
+            .collect())
     }
 
     pub(crate) async fn post_setting(&self, setting: Setting, confirm: bool) -> Result<(), String> {

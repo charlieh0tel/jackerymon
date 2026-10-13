@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
+use chrono::Utc;
 use jackerymon::ble;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
@@ -19,6 +20,7 @@ use crate::connection::KeyHome;
 use crate::daemon_client::DaemonClient;
 use crate::daemon_client::Endpoint;
 use crate::record::Update;
+use crate::tui::monitor::HISTORY;
 
 /// Delay before reconnecting to a daemon's event stream.
 const DAEMON_RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -115,6 +117,16 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
 pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Result<Source> {
     let (client, serial) = DaemonClient::connect(endpoint, expected).await?;
     let (sender, updates) = mpsc::unbounded_channel();
+    // The chart's window of logged samples, so it opens full; the live
+    // stream then replays the latest, which the monitor skips as a repeat.
+    let window = chrono::Duration::from_std(HISTORY).context("chart window")?;
+    for update in client
+        .history(Utc::now() - window)
+        .await
+        .unwrap_or_default()
+    {
+        sender.send(update).ok();
+    }
     let (commands, mut asked) = mpsc::channel::<Command>(1);
     let (stop, stopped) = oneshot::channel::<()>();
     let client = Arc::new(client);
