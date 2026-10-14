@@ -35,13 +35,16 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim);
 .down { background: #450a0a; color: var(--bad); }
 
 .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
-button {
+button, select {
   background: #262b33; color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer;
 }
-button:hover { border-color: #3d4452; }
+button:hover, select:hover { border-color: #3d4452; }
 button[aria-pressed="true"] { background: var(--accent); color: #07121a; border-color: var(--accent); }
 .grow { flex: 1; }
+label { color: var(--dim); display: inline-flex; gap: 6px; align-items: center; }
+#ranges input[type=number] { width: 5em; }
+#ranges input, #ranges select { padding: 3px 6px; }
 
 table { border-collapse: collapse; font-size: 12px; }
 th { text-align: left; color: var(--dim); font-weight: 500; padding: 2px 16px 2px 0; }

@@ -312,6 +312,49 @@ test("a range button reads that range and keeps it in the address", async ({ pag
   await expect(page.locator('#ranges button[aria-pressed="true"]')).toHaveText("7 d");
 });
 
+// The length of the window last asked of /series, in seconds.
+const askedSpan = (fake) => {
+  const q = fake.query.series;
+  return (Date.parse(q.get("until")) - Date.parse(q.get("since"))) / 1000;
+};
+
+test("any length can be typed as last N of a unit", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  // The default, 6 h, shows in the box too.
+  await expect(page.locator("#range-count")).toHaveValue("6");
+  await expect(page.locator("#range-unit")).toHaveValue("3600");
+  await page.locator("#range-count").fill("5");
+  await page.locator("#range-count").press("Enter");
+  await expect(page).toHaveURL(/last=18000/);
+  await expect.poll(() => askedSpan(fake)).toBe(18000);
+  await expect(page.locator("#ranges button[aria-pressed=true]")).toHaveCount(0);
+  await page.locator("#range-unit").selectOption("86400");
+  await expect(page).toHaveURL(/last=432000/);
+  await expect.poll(() => askedSpan(fake)).toBe(432000);
+});
+
+test("a link with any length opens on it, shown in the box", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake, "/?last=1209600");
+  await expect.poll(() => fake.query.series && askedSpan(fake)).toBe(1209600);
+  await expect(page.locator("#range-count")).toHaveValue("2");
+  await expect(page.locator("#range-unit")).toHaveValue("604800");
+});
+
+test("a count that is not a whole number above zero is put back", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  for (const bad of ["0", "-3", "1.5"]) {
+    await page.locator("#range-count").fill(bad);
+    await page.locator("#range-count").press("Enter");
+    await expect(page.locator("#range-count")).toHaveValue("6");
+  }
+  expect(askedSpan(fake)).toBe(21600);
+});
+
 test("a read left behind is neither drawn nor reported as a failure", async ({ page }) => {
   const fake = new Fake();
   fake.delay.series = 1500;

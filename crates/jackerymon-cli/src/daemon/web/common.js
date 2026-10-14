@@ -184,29 +184,50 @@ function content(spec) {
 
 // ---------------------------------------------------------------- range
 
-// The chart windows offered, in seconds, and the default.
+// The chart windows offered, in seconds, and the default; any other
+// length can be typed in a unit below.
 const RANGE_PRESETS = [["10 min", 600], ["6 h", 21600], ["24 h", 86400], ["7 d", 604800]];
 const DEFAULT_RANGE = 21600;
+const RANGE_UNITS = [["min", 60], ["h", 3600], ["d", 86400], ["w", 604800]];
 
 // The window shown, kept in the address so a reload or a shared link
-// keeps it.
+// keeps it.  Any whole number of minutes.
 function readRange() {
   const last = Number(new URLSearchParams(location.search).get("last"));
-  return RANGE_PRESETS.some(([, s]) => s === last) ? last : DEFAULT_RANGE;
+  return Number.isInteger(last / 60) && last > 0 ? last : DEFAULT_RANGE;
 }
 
+// A length as a count of the biggest unit that divides it.
+function splitLength(seconds) {
+  const [, size] = [...RANGE_UNITS].reverse().find(([, size]) => Number.isInteger(seconds / size));
+  return [seconds / size, size];
+}
+
+// Presets, and "last [N] [unit]" for any other length.
 function rangeControl(el, current, changed) {
-  el.innerHTML = RANGE_PRESETS
-    .map(([label, secs]) => `<button data-last="${secs}" aria-pressed="${secs === current}">${esc(label)}</button>`)
-    .join(" ");
-  for (const b of el.querySelectorAll("button")) {
-    b.onclick = () => {
-      const last = Number(b.dataset.last);
-      const q = new URLSearchParams(location.search);
-      q.set("last", String(last));
-      history.replaceState(null, "", `${location.pathname}?${q}`);
-      rangeControl(el, last, changed);
-      changed(last);
-    };
-  }
+  const [count, size] = splitLength(current);
+  el.innerHTML =
+    RANGE_PRESETS
+      .map(([label, secs]) => `<button data-last="${secs}" aria-pressed="${secs === current}">${esc(label)}</button>`)
+      .join(" ") +
+    ` <label>last <input id="range-count" type="number" min="1" step="1" value="${count}">` +
+    ` <select id="range-unit">` +
+    RANGE_UNITS.map(([name, s]) => `<option value="${s}"${s === size ? " selected" : ""}>${name}</option>`).join("") +
+    `</select></label>`;
+  const choose = (last) => {
+    const q = new URLSearchParams(location.search);
+    q.set("last", String(last));
+    history.replaceState(null, "", `${location.pathname}?${q}`);
+    rangeControl(el, last, changed);
+    changed(last);
+  };
+  for (const b of el.querySelectorAll("button")) b.onclick = () => choose(Number(b.dataset.last));
+  const typed = () => {
+    const n = Number($("range-count").value);
+    // Anything but a whole number above zero puts the box back.
+    if (Number.isInteger(n) && n > 0) choose(n * Number($("range-unit").value));
+    else rangeControl(el, current, changed);
+  };
+  $("range-count").onchange = typed;
+  $("range-unit").onchange = typed;
 }
