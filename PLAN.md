@@ -89,7 +89,8 @@ once the Rust key fetch matched it (it remains in git history).
 - **Clients find a running daemon.**  `tui` and `set` look for the named
   unit's socket (from `--unit` or `--key-file`), or the only one running,
   in the user's runtime directory and then `/run/jackerymon`, and check
-  the daemon's serial before sending anything.  `--direct` skips the
+  the daemon's serial before sending anything.  A directory or socket
+  they may not open is an error, not a reason to go direct.  `--direct` skips the
   daemon; `--daemon` names one by URL or socket.  They never start or
   stop a daemon.
 - **TUI.** It consumes updates, not BLE, so it connects directly or

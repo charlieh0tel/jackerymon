@@ -41,6 +41,8 @@ const LOCK_MODE: u32 = 0o644;
 /// the system daemon's admits the `jackerymon` group.
 const SOCKET_MODE: u32 = 0o660;
 const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
+/// Why a daemon's directory or socket is usually closed to a user.
+const DENIED_HINT: &str = "not in the jackerymon group?";
 
 fn user_directory() -> Option<PathBuf> {
     env::var_os("XDG_RUNTIME_DIR")
@@ -213,15 +215,14 @@ fn find_in(directories: &[PathBuf], unit: Option<&str>) -> Result<Option<PathBuf
     for directory in directories {
         let candidates = match unit {
             Some(unit) => vec![socket_path(directory, unit)],
-            None => sockets_in(directory),
+            None => sockets_in(directory)?,
         };
         for path in candidates {
             match UnixStream::connect(&path) {
                 Ok(_) => live.push(path),
-                Err(error) if error.kind() == ErrorKind::PermissionDenied => bail!(
-                    "a daemon answers at {}, but this user may not connect",
-                    path.display()
-                ),
+                Err(error) if error.kind() == ErrorKind::PermissionDenied => {
+                    bail!("{}: permission denied; {DENIED_HINT}", path.display())
+                }
                 // Absent, or left behind by a daemon that died.
                 Err(_) => {}
             }
@@ -243,9 +244,13 @@ fn find_in(directories: &[PathBuf], unit: Option<&str>) -> Result<Option<PathBuf
     }
 }
 
-fn sockets_in(directory: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return Vec::new();
+fn sockets_in(directory: &Path) -> Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::PermissionDenied => {
+            bail!("{}: permission denied; {DENIED_HINT}", directory.display())
+        }
+        Err(_) => return Ok(Vec::new()),
     };
     let mut sockets: Vec<PathBuf> = entries
         .filter_map(|entry| Some(entry.ok()?.path()))
@@ -255,7 +260,7 @@ fn sockets_in(directory: &Path) -> Vec<PathBuf> {
         })
         .collect();
     sockets.sort();
-    sockets
+    Ok(sockets)
 }
 
 #[cfg(test)]
@@ -297,6 +302,21 @@ mod tests {
         drop((listener, other, claimed, other_claimed));
         drop(reclaimed);
         assert!(!path.exists() && !second.exists());
+        fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[test]
+    fn a_closed_directory_is_reported_not_skipped() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-closed-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("directory");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o000)).expect("close");
+        // Root reads it anyway; there is nothing to test then.
+        if fs::read_dir(&directory).is_err() {
+            let error = find_in(std::slice::from_ref(&directory), None).expect_err("closed");
+            assert!(error.to_string().contains("permission denied"), "{error}");
+        }
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("open");
         fs::remove_dir_all(&directory).expect("cleanup");
     }
 
