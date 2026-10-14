@@ -14,7 +14,7 @@ test("the charts' time axes line up when drawing them adds a scrollbar", async (
   await page.setViewportSize({ width: 1000, height: 800 });
   await fake.install(page);
   await page.goto("/");
-  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
   const plots = page.locator("#charts .u-over");
   const boxes = () =>
     plots.evaluateAll((all) => all.map((p) => p.getBoundingClientRect()).map(({ left, width }) => ({ left, width })));

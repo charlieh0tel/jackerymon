@@ -70,13 +70,12 @@ test("the unit table lists what the unit reports, read-only", async ({ page }) =
   await expect(page.locator("#unit button, #unit input, #unit select")).toHaveCount(0);
 });
 
-test("three charts are drawn from /series for the default range", async ({ page }) => {
+test("two charts are drawn from /series for the default range", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
   await expect(page.locator("#charts")).toContainText("Power");
-  await expect(page.locator("#charts")).toContainText("Charge");
-  await expect(page.locator("#charts")).toContainText("Temperature");
+  await expect(page.locator("#charts")).toContainText("Battery");
   const q = fake.query.series;
   const span = (Date.parse(q.get("until")) - Date.parse(q.get("since"))) / 1000;
   expect(span).toBe(21600);
@@ -95,10 +94,47 @@ test("the power chart estimates battery power as input minus output", async ({ p
   expect(net).toEqual([180, null]);
 });
 
+// Where each tick of the battery chart's two y axes falls, in pixels,
+// and the scale ranges, from the page's own uPlot instance.
+const batteryTicks = (page) =>
+  page.evaluate(() => {
+    const u = charts[1];
+    const at = (axis) => u.axes[axis]._splits.map((v) => Math.round(u.valToPos(v, u.axes[axis].scale)));
+    return { left: at(1), right: at(2), percent: u.scales["%"], celsius: u.scales["°C"] };
+  });
+
+test("the battery chart's right axis ticks fall on the left axis gridlines", async ({ page }) => {
+  const fake = new Fake();
+  fake.series.battery_percent = fake.series.battery_percent.map((_, i) => 99 + (i % 2));
+  fake.series.battery_celsius = fake.series.battery_celsius.map((_, i) => 27.4 + i / 10);
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  const { left, right, percent, celsius } = await batteryTicks(page);
+  expect(left.length).toBeGreaterThan(2);
+  expect(right).toEqual(left);
+  // The ranges hold the data, and charge stays at or under 100 %.
+  expect(percent.min).toBeLessThanOrEqual(99);
+  expect(percent.max).toBe(100);
+  expect(celsius.min).toBeLessThanOrEqual(27.4);
+  expect(celsius.max).toBeGreaterThanOrEqual(27.4 + 5.9);
+});
+
+test("flat or missing battery data still gets ticks on both axes", async ({ page }) => {
+  const fake = new Fake();
+  fake.series.battery_percent = fake.series.battery_percent.map(() => 100);
+  fake.series.battery_celsius = fake.series.battery_celsius.map(() => null);
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  const { left, right, percent } = await batteryTicks(page);
+  expect(right).toEqual(left);
+  expect(percent.max).toBe(100);
+  expect(percent.min).toBeLessThan(100);
+});
+
 test("a range button reads that range and keeps it in the address", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
   await page.locator("#ranges button", { hasText: "7 d" }).click();
   await expect(page).toHaveURL(/last=604800/);
   await expect
