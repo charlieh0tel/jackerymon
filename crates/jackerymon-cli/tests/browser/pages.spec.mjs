@@ -90,8 +90,38 @@ test("the power chart estimates battery power as input minus output", async ({ p
   await open(page, fake);
   await expect(page.locator("#charts")).toContainText("battery W, estimated");
   // `charts` is the page's own list of uPlot instances.
-  const net = await page.evaluate(() => charts[0].data[3].slice(0, 2));
+  const net = await page.evaluate(() => {
+    const power = charts[0];
+    const at = power.series.findIndex((series) => series.label?.startsWith("battery W"));
+    return power.data[at].slice(0, 2);
+  });
   expect(net).toEqual([180, null]);
+});
+
+// The Power chart's line labels, in order.
+const powerLabels = (page) => page.evaluate(() => charts[0].series.slice(1).map((series) => series.label));
+
+test("input sources that delivered nothing in the window get no line", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  expect(await powerLabels(page)).toEqual([
+    "AC input W",
+    "input W",
+    "output W",
+    "battery W, estimated (in − out)",
+  ]);
+});
+
+test("each input source that delivered something gets its own line", async ({ page }) => {
+  const fake = new Fake();
+  fake.series.solar_input_watts = fake.series.solar_input_watts.map((v, i) => (i === 3 ? 120 : v));
+  fake.series.car_input_watts = fake.series.car_input_watts.map(() => null);
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  const labels = await powerLabels(page);
+  expect(labels).toContain("solar input W");
+  expect(labels).not.toContain("car input W");
 });
 
 // Where each tick of the battery chart's two y axes falls, in pixels,

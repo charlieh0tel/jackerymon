@@ -41,6 +41,11 @@
 const haveUplot = typeof uPlot !== "undefined";
 // Input and output in the TUI's colors; battery in the accent.
 const INPUT = "#4ade80";
+const AC_INPUT = "#a78bfa";
+const CAR_INPUT = "#f472b6";
+const SOLAR_INPUT = "#fb923c";
+// The total input is a thin line over its sources, which should sum to it.
+const TOTAL_WIDTH = 1;
 const OUTPUT = "#fbbf24";
 const BATTERY = "#38bdf8";
 const TEMPERATURE = "#f87171";
@@ -196,13 +201,20 @@ async function load(signal) {
     { ...extent(s.battery_percent, PERCENT_STEP), ceiling: FULL },
     extent(s.battery_celsius, CELSIUS_STEP),
   ]);
+  // Each input source that delivered anything in the window.
+  const sources = [
+    ["AC input W", s.ac_input_watts, AC_INPUT],
+    ["car input W", s.car_input_watts, CAR_INPUT],
+    ["solar input W", s.solar_input_watts, SOLAR_INPUT],
+  ].filter(([, values]) => values?.some((v) => v > 0));
   clearCharts("");
   charts = [
     chart(
       "Power",
-      [s.time, s.input_watts, s.output_watts, net],
+      [s.time, ...sources.map(([, values]) => values), s.input_watts, s.output_watts, net],
       [
-        { label: "input W", stroke: INPUT, scale: "W" },
+        ...sources.map(([label, , stroke]) => ({ label, stroke, scale: "W" })),
+        { label: "input W", stroke: INPUT, width: TOTAL_WIDTH, scale: "W" },
         { label: "output W", stroke: OUTPUT, scale: "W" },
         { label: "battery W, estimated (in − out)", stroke: BATTERY, dash: ESTIMATE_DASH, scale: "W" },
       ],

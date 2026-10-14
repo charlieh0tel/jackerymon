@@ -115,7 +115,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   polling result, so a supervisor sees failures.
 - **Web view, after smartclock-web.**  The daemon serves one page at
   `/` over TCP, read-only: a status strip polled every second; power
-  and battery charts over 10 min to 7 d; and the unit's settings.
+  and battery charts over 10 min to 7 d; and the unit's settings.  The
+  power chart draws each input source that delivered anything in the
+  window, under a thin line for the reported total they should sum to.
   Y axes have fixed widths, and a chart without a right axis pads the
   same room, so the time axes line up.  A right axis takes the left's
   number of divisions, each a round step, so its ticks fall on the

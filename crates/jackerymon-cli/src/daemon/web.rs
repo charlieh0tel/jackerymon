@@ -105,6 +105,9 @@ pub(super) struct Series {
     /// Unix seconds, the start of each bucket.
     time: Vec<i64>,
     input_watts: Vec<Option<f64>>,
+    ac_input_watts: Vec<Option<f64>>,
+    car_input_watts: Vec<Option<f64>>,
+    solar_input_watts: Vec<Option<f64>>,
     output_watts: Vec<Option<f64>>,
     battery_percent: Vec<Option<f64>>,
     battery_celsius: Vec<Option<f64>>,
@@ -118,6 +121,9 @@ pub(super) struct Series {
 struct Bucket {
     start: i64,
     input_watts: Mean,
+    ac_input_watts: Mean,
+    car_input_watts: Mean,
+    solar_input_watts: Mean,
     output_watts: Mean,
     battery_percent: Mean,
     battery_celsius: Mean,
@@ -146,16 +152,19 @@ impl Mean {
 impl Series {
     /// A row of nulls at `start`, which breaks the chart's lines there.
     fn push_gap(&mut self, start: i64) {
-        self.time.push(start);
-        self.input_watts.push(None);
-        self.output_watts.push(None);
-        self.battery_percent.push(None);
-        self.battery_celsius.push(None);
+        self.push(&Bucket {
+            start,
+            ..Bucket::default()
+        });
     }
 
     fn push(&mut self, bucket: &Bucket) {
         self.time.push(bucket.start);
         self.input_watts.push(bucket.input_watts.value());
+        self.ac_input_watts.push(bucket.ac_input_watts.value());
+        self.car_input_watts.push(bucket.car_input_watts.value());
+        self.solar_input_watts
+            .push(bucket.solar_input_watts.value());
         self.output_watts.push(bucket.output_watts.value());
         self.battery_percent.push(bucket.battery_percent.value());
         self.battery_celsius.push(bucket.battery_celsius.value());
@@ -214,6 +223,13 @@ pub(super) fn series(
             ..Bucket::default()
         });
         current.input_watts.add(status.input_watts.map(f64::from));
+        current
+            .ac_input_watts
+            .add(status.ac_input_watts.map(f64::from));
+        current
+            .car_input_watts
+            .add(status.car_input_watts.map(f64::from));
+        current.solar_input_watts.add(status.solar_input_watts);
         current.output_watts.add(status.output_watts.map(f64::from));
         current
             .battery_percent
@@ -315,6 +331,36 @@ mod tests {
         let times: Vec<i64> = series.time.iter().map(|&t| t - noon_plus(0)).collect();
         assert_eq!(times, [0, 600, 660]);
         assert_eq!(series.input_watts, [None, Some(100.0), None]);
+    }
+
+    #[test]
+    fn input_is_also_given_by_source() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-sources-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let line = SampleRecord {
+            timestamp: "2026-10-11T12:00:00+00:00".to_owned(),
+            sample: 0,
+            connection: 1,
+            transport_failures: 0,
+            query_ms: 1.0,
+            status: json!({"ip": 350, "acip": 300, "cip": 20, "acpsp": 300})
+                .as_object()
+                .expect("object")
+                .clone(),
+        };
+        fs::write(directory.join("2026-10-11.jsonl"), format!("{line}\n")).expect("log");
+        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+            .expect("time")
+            .to_utc();
+        let series =
+            series(&directory, noon, noon + chrono::Duration::seconds(30), 60).expect("series");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert_eq!(series.input_watts, [Some(350.0)]);
+        assert_eq!(series.ac_input_watts, [Some(300.0)]);
+        assert_eq!(series.car_input_watts, [Some(20.0)]);
+        // Solar is reported in tenths of a watt.
+        assert_eq!(series.solar_input_watts, [Some(30.0)]);
     }
 
     #[test]
