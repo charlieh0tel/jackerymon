@@ -1,8 +1,7 @@
 # jackerymon
 
 Monitor and control a Jackery Explorer power station over Bluetooth LE,
-without Jackery's cloud.  Linux only; needs BlueZ, and the D-Bus
-headers to build.  Background: [PLAN.md](PLAN.md),
+without Jackery's cloud.  Linux only.  Background: [PLAN.md](PLAN.md),
 [FINDINGS.md](FINDINGS.md), [docs/protocol.md](docs/protocol.md).
 
 ![The daemon's web view: a day of power, charge and temperature](docs/images/web.png)
