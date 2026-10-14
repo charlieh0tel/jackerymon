@@ -83,6 +83,18 @@ test("three charts are drawn from /series for the default range", async ({ page 
   await expect(page.locator('#ranges button[aria-pressed="true"]')).toHaveText("6 h");
 });
 
+test("the power chart estimates battery power as input minus output", async ({ page }) => {
+  const fake = new Fake();
+  const { input_watts: input, output_watts: output } = fake.series;
+  [input[0], output[0]] = [300, 120];
+  [input[1], output[1]] = [null, 50];
+  await open(page, fake);
+  await expect(page.locator("#charts")).toContainText("battery W, estimated");
+  // `charts` is the page's own list of uPlot instances.
+  const net = await page.evaluate(() => charts[0].data[3].slice(0, 2));
+  expect(net).toEqual([180, null]);
+});
+
 test("a range button reads that range and keeps it in the address", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);

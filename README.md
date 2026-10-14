@@ -89,7 +89,7 @@ Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
 | `GET /events` | server-sent events: current state, then changes | yes |
 | `GET /history?since=…&until=…` | logged samples, JSON lines; needs `--log-dir` | yes |
 | `GET /series?since=…&every=…` | chart columns, averaged per interval; needs `--log-dir` | yes |
-| `GET /` | the web view: live status; power, charge and temperature charts; the unit's settings (read-only) | yes |
+| `GET /` | the web view: live status; power, charge and temperature charts (battery power estimated as input minus output); the unit's settings (read-only) | yes |
 | `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | only with `--tcp-control` |
 
 ```sh

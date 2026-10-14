@@ -50,7 +50,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Property model follows the BLE wire keys.**  `Status` types the
   documented keys and keeps every field in `raw`.  Absent keys are
   `None`; wrong types fail; unknown enum values are kept as `Unknown`.
-  Battery current or power is never derived from input/output totals.
+  The unit reports no battery current or power, and the library does
+  not derive one; the web view draws input minus output, marked as an
+  estimate, since losses and the unit's own draw are hidden in it.
 - **Polling lives in the library.**  It is generic over a small
   connector/link pair so its retry policy is tested offline.  Events go
   to a callback that can stop polling; a stop future also closes the
