@@ -510,6 +510,7 @@ mod tests {
                         .expect("type")
                         .to_owned();
                     assert!(content_type.starts_with(kind), "{path}: {content_type}");
+                    assert_eq!(page.headers()[reqwest::header::CACHE_CONTROL], "no-cache");
                 }
                 let series: serde_json::Value =
                     reqwest::get(format!("{base}/series?{query}&every=60"))

@@ -12,6 +12,7 @@ use axum::body::Bytes;
 use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::http::header::CACHE_CONTROL;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::IntoResponse;
 use axum::response::Response;
@@ -57,6 +58,9 @@ const HISTORY_BUFFER: usize = 256;
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 const CSS_CONTENT_TYPE: &str = "text/css; charset=utf-8";
 const JS_CONTENT_TYPE: &str = "text/javascript; charset=utf-8";
+/// Pages are checked on every load, so an upgraded daemon's page is the
+/// one shown.
+const PAGE_CACHE_CONTROL: &str = "no-cache";
 /// One JSON value per line.
 const JSON_LINES_CONTENT_TYPE: &str = "application/x-ndjson";
 /// Prometheus text exposition format, version 0.0.4.
@@ -122,7 +126,14 @@ fn author() -> &'static str {
 
 /// A page or asset built into the binary.
 fn page(content_type: &'static str, body: &'static str) -> Response {
-    ([(CONTENT_TYPE, content_type)], body).into_response()
+    (
+        [
+            (CONTENT_TYPE, content_type),
+            (CACHE_CONTROL, PAGE_CACHE_CONTROL),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// `GET /series` query parameters: RFC 3339 times and a bucket width in
