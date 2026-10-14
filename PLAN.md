@@ -123,7 +123,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
   smartclock-web; served by the daemon rather than a separate process,
   since one daemon owns one unit.  `/series` averages samples into
-  intervals of at most 5,000 points; `/status` carries the reading
+  intervals of at most 5,000 points, and marks a stretch with no
+  sample for over a minute (the `/metrics` staleness limit) and at
+  least one empty interval with a row of nulls, so the charts break
+  there rather than draw across it; `/status` carries the reading
   worded as the TUI words it (`text.rs`), and the
   footer's author, license and repository from Cargo metadata.  Playwright tests fake the API
   per test; because the daemon needs a key and an adapter to start, they

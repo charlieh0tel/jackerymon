@@ -519,7 +519,13 @@ mod tests {
                         .json()
                         .await
                         .expect("json");
-                assert_eq!(series["time"].as_array().map(Vec::len), Some(1));
+                // The one sample's minute, among gaps where the range runs
+                // past it.
+                let taken = chrono::DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+                    .expect("time")
+                    .timestamp();
+                let times = series["time"].as_array().expect("column");
+                assert!(times.contains(&taken.into()), "{times:?}");
                 assert_eq!(series["every"], 60);
             }
             stop.send(()).expect("stop");

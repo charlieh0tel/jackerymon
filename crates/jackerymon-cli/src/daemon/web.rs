@@ -11,6 +11,7 @@ use jackerymon::status::Status;
 use serde::Serialize;
 
 use super::log;
+use super::metrics::STALE_AFTER;
 use crate::record::SampleRecord;
 use crate::text::battery_protection_text;
 use crate::text::battery_state_text;
@@ -143,6 +144,15 @@ impl Mean {
 }
 
 impl Series {
+    /// A row of nulls at `start`, which breaks the chart's lines there.
+    fn push_gap(&mut self, start: i64) {
+        self.time.push(start);
+        self.input_watts.push(None);
+        self.output_watts.push(None);
+        self.battery_percent.push(None);
+        self.battery_celsius.push(None);
+    }
+
     fn push(&mut self, bucket: &Bucket) {
         self.time.push(bucket.start);
         self.input_watts.push(bucket.input_watts.value());
@@ -154,7 +164,10 @@ impl Series {
 
 /// Logged samples in `since..=until`, averaged over buckets `every`
 /// seconds wide, widened if the range would need more than
-/// [`MAX_POINTS`].
+/// [`MAX_POINTS`].  Where no sample was logged for longer than
+/// [`STALE_AFTER`] and at least one bucket is empty, including at either
+/// end of the range, a row of nulls at the first empty bucket marks the
+/// gap.
 pub(super) fn series(
     directory: &Path,
     since: DateTime<Utc>,
@@ -164,11 +177,18 @@ pub(super) fn series(
     let span = (until - since).num_seconds().max(1);
     // The span is positive, so this rounds up.
     let every = every.max(1).max((span + MAX_POINTS - 1) / MAX_POINTS);
+    let stale = i64::try_from(STALE_AFTER.as_secs()).unwrap_or(i64::MAX);
+    let bucket_of = |seconds: i64| seconds - seconds.rem_euclid(every);
     let mut series = Series {
         every,
         ..Series::default()
     };
     let mut bucket: Option<Bucket> = None;
+    // When the previous sample was taken, and the first bucket after its
+    // own, which is where a gap after it starts.  Before any sample, the
+    // range's start and its bucket.
+    let mut previous = since.timestamp();
+    let mut next_bucket = bucket_of(previous);
     log::read_history(directory, since, until, |line| {
         let Ok(record) = serde_json::from_str::<SampleRecord>(line) else {
             return true;
@@ -180,10 +200,15 @@ pub(super) fn series(
             return true;
         };
         let seconds = taken.timestamp();
-        let start = seconds - seconds.rem_euclid(every);
+        let start = bucket_of(seconds);
         if bucket.as_ref().is_some_and(|bucket| bucket.start != start) {
             series.push(&bucket.take().expect("checked"));
         }
+        if seconds - previous > stale && next_bucket < start {
+            series.push_gap(next_bucket);
+        }
+        previous = seconds;
+        next_bucket = start + every;
         let current = bucket.get_or_insert_with(|| Bucket {
             start,
             ..Bucket::default()
@@ -198,6 +223,9 @@ pub(super) fn series(
     })?;
     if let Some(bucket) = bucket {
         series.push(&bucket);
+        if until.timestamp() - previous > stale && next_bucket <= until.timestamp() {
+            series.push_gap(next_bucket);
+        }
     }
     Ok(series)
 }
@@ -211,6 +239,89 @@ mod tests {
 
     use super::series;
     use crate::record::SampleRecord;
+
+    /// A logged sample `offset` seconds after 2026-10-11T12:00:00Z.
+    fn sample_at(offset: i64, ip: u32) -> String {
+        let taken = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z").expect("time")
+            + chrono::Duration::seconds(offset);
+        SampleRecord {
+            timestamp: taken.to_rfc3339(),
+            sample: 0,
+            connection: 1,
+            transport_failures: 0,
+            query_ms: 1.0,
+            status: json!({"ip": ip, "op": 0, "rb": 90, "bt": 250})
+                .as_object()
+                .expect("object")
+                .clone(),
+        }
+        .to_string()
+    }
+
+    /// The series of samples at `offsets`, over `since..until` seconds
+    /// after noon, in buckets `every` seconds wide.
+    fn series_of(name: &str, offsets: &[i64], since: i64, until: i64, every: i64) -> super::Series {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-{name}-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let lines: Vec<String> = offsets
+            .iter()
+            .map(|&offset| sample_at(offset, 100))
+            .collect();
+        fs::write(directory.join("2026-10-11.jsonl"), lines.join("\n") + "\n").expect("log");
+        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+            .expect("time")
+            .to_utc();
+        let at = |offset: i64| noon + chrono::Duration::seconds(offset);
+        let series = series(&directory, at(since), at(until), every).expect("series");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        series
+    }
+
+    /// The unix time `offset` seconds after noon.
+    fn noon_plus(offset: i64) -> i64 {
+        DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+            .expect("time")
+            .timestamp()
+            + offset
+    }
+
+    #[test]
+    fn a_pause_longer_than_a_minute_is_a_gap() {
+        // Every 5 s, then nothing for five minutes.
+        let series = series_of("gap", &[0, 5, 10, 310, 315], 0, 320, 10);
+        let times: Vec<i64> = series.time.iter().map(|&t| t - noon_plus(0)).collect();
+        assert_eq!(times, [0, 10, 20, 310]);
+        assert_eq!(
+            series.input_watts,
+            [Some(100.0), Some(100.0), None, Some(100.0)]
+        );
+    }
+
+    #[test]
+    fn sampling_slower_than_the_buckets_is_not_a_gap() {
+        // One-second buckets, a sample every 5 s: most buckets are empty.
+        let series = series_of("pace", &[0, 5, 10, 15, 20], 0, 22, 1);
+        assert!(
+            series.input_watts.iter().all(Option::is_some),
+            "{:?}",
+            series.input_watts
+        );
+    }
+
+    #[test]
+    fn a_range_logging_did_not_cover_is_a_gap_at_each_end() {
+        let series = series_of("ends", &[600, 605], 0, 1200, 60);
+        let times: Vec<i64> = series.time.iter().map(|&t| t - noon_plus(0)).collect();
+        assert_eq!(times, [0, 600, 660]);
+        assert_eq!(series.input_watts, [None, Some(100.0), None]);
+    }
+
+    #[test]
+    fn no_samples_is_no_rows() {
+        let series = series_of("none", &[], 0, 1200, 60);
+        assert!(series.time.is_empty());
+    }
 
     #[test]
     fn series_averages_each_bucket() {
