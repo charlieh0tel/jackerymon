@@ -98,6 +98,21 @@ curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
     http://localhost/settings
 ```
 
+For Prometheus, and Grafana on top of it, scrape `/metrics`; set
+`JACKERYMON_LISTEN` (below) if Prometheus runs elsewhere:
+
+```yaml
+scrape_configs:
+  - job_name: jackery
+    static_configs:
+      - targets: ["host:9888"]
+```
+
+Metrics cover battery charge and temperature, input and output power
+by source, the unit's time estimates, AC output, outputs on, fault
+code, and the link (`jackery_connected`, counters, last sample time).
+Readings older than 60 s are left out.
+
 Setting keys and values are in `docs/protocol.md`; other options are in
 `jackerymon daemon --help`. A custom `--socket` belongs in a directory
 only its users can write. TCP has no authentication, so with
