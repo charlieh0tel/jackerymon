@@ -174,6 +174,20 @@ const batteryTicks = (page) =>
     return { left: at(1), right: at(2), percent: u.scales["%"], celsius: u.scales["°C"] };
   });
 
+test("dragging across a chart does not zoom it", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  const scale = () => page.evaluate(() => ({ min: charts[0].scales.x.min, max: charts[0].scales.x.max }));
+  const before = await scale();
+  const box = await page.locator("#charts .u-over").first().boundingBox();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect(await scale()).toEqual(before);
+});
+
 test("hovering a chart draws one vertical line on each chart and no horizontal one", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);

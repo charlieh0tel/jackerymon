@@ -105,7 +105,8 @@ function chart(title, data, series, axes, scales = {}) {
       padding: [null, right ? null : AXIS_SIZE, null, null],
       // No horizontal crosshair: the charts' y scales differ, and uPlot
       // parks a synced chart's line just above its plot, where it shows.
-      cursor: { y: false, sync: { key: SYNC.key } },
+      // No drag to zoom: the next read would redraw the charts and drop it.
+      cursor: { y: false, drag: { x: false, y: false }, sync: { key: SYNC.key } },
       series: [{}, ...series],
       axes: [{ stroke: AXIS_DIM, grid: { stroke: "#2b3038" } }, ...axes],
       scales: { x: { time: true }, ...scales },
