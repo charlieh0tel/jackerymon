@@ -199,6 +199,20 @@ test("the battery chart's right axis ticks fall on the left axis gridlines", asy
   expect(celsius.max).toBeGreaterThanOrEqual(27.4 + 5.9);
 });
 
+test("y axes have no titles, and each one's numbers take its line's color", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  const axes = await page.evaluate(() => {
+    const u = charts[1];
+    return [1, 2].map((i) => ({ label: u.axes[i].label ?? null, number: u.axes[i].stroke(u, i), line: u.series[i].stroke(u, i) }));
+  });
+  for (const { label, number, line } of axes) {
+    expect(label).toBeNull();
+    expect(number).toBe(line);
+  }
+});
+
 test("flat or missing battery data still gets ticks on both axes", async ({ page }) => {
   const fake = new Fake();
   fake.series.battery_percent = fake.series.battery_percent.map(() => 100);

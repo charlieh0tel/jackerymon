@@ -122,7 +122,8 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   is on, appears when it was on in the window.  A right axis's range
   is centered on its data, so a steady 60 Hz sits mid-chart.
   Y axes have fixed widths, and a chart without a right axis pads the
-  same room, so the time axes line up.  A right axis takes the left's
+  same room, so the time axes line up.  Y axes have no rotated titles;
+  their numbers take their line's color, and the legend gives units.  A right axis takes the left's
   number of divisions, each a round step, so its ticks fall on the
   left's gridlines.  Same
   look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
