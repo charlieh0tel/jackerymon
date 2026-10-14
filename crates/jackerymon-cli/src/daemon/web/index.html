@@ -171,10 +171,12 @@ rangeControl($("ranges"), range, (last) => {
   range = last;
   renew();
 });
-// Charts follow the window's width.
-addEventListener("resize", () => {
+// Charts follow the panel's width, all at once.  The panel narrows when
+// a scrollbar appears, which drawing the first chart can cause, so a
+// window resize alone would leave the charts different widths.
+new ResizeObserver(() => {
   for (const c of charts) c.setSize({ width: $("charts").clientWidth, height: CHART_HEIGHT });
-});
+}).observe($("charts"));
 
 content({
   load,

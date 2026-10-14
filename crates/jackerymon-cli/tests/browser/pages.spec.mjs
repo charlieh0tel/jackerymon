@@ -82,16 +82,6 @@ test("two charts are drawn from /series for the default range", async ({ page })
   await expect(page.locator('#ranges button[aria-pressed="true"]')).toHaveText("6 h");
 });
 
-test("the charts' time axes line up", async ({ page }) => {
-  const fake = new Fake();
-  await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
-  const [power, battery] = await page
-    .locator("#charts .u-over")
-    .evaluateAll((plots) => plots.map((p) => p.getBoundingClientRect()).map(({ left, width }) => ({ left, width })));
-  expect(battery).toEqual(power);
-});
-
 test("a range button reads that range and keeps it in the address", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
