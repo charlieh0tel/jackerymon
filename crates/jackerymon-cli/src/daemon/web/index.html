@@ -49,6 +49,9 @@ const POINTS = 1500;
 // How often a window ending now is read again.
 const CHART_EVERY = 30000;
 const CHART_HEIGHT = 220;
+// Y axes get fixed widths, and every chart has a right axis, so the
+// charts' plot areas, and with them their time axes, line up.
+const AXIS_SIZE = 60;
 // Hovering one chart moves the cursor on the other.
 const SYNC = haveUplot ? uPlot.sync("jackerymon") : null;
 
@@ -82,7 +85,13 @@ function chart(title, data, series, axes) {
 }
 
 const yAxis = (label, scale, side = 3) => ({
-  label, scale, side, stroke: "#8b929c", grid: { stroke: "#2b3038", show: side === 3 },
+  label, scale, side, size: AXIS_SIZE, stroke: "#8b929c", grid: { stroke: "#2b3038", show: side === 3 },
+});
+// Room on the right of a chart with nothing to show there; the empty
+// label keeps the room a label takes.
+const blankAxis = (scale) => ({
+  scale, side: 1, size: AXIS_SIZE, label: "", values: (u, ticks) => ticks.map(() => ""),
+  ticks: { show: false }, grid: { show: false },
 });
 
 async function load(signal) {
@@ -108,7 +117,7 @@ async function load(signal) {
         { label: "input W", stroke: INPUT, scale: "W" },
         { label: "output W", stroke: OUTPUT, scale: "W" },
       ],
-      [yAxis("W", "W")],
+      [yAxis("W", "W"), blankAxis("W")],
     ),
     chart(
       "Battery",
