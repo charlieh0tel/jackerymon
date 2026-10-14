@@ -111,7 +111,8 @@ pub(super) struct Series {
     output_watts: Vec<Option<f64>>,
     battery_percent: Vec<Option<f64>>,
     battery_celsius: Vec<Option<f64>>,
-    /// Over samples with the AC output on; null when it was off.
+    /// Over samples with the AC output on and up, reading above zero;
+    /// null when it was off.
     ac_output_volts: Vec<Option<f64>>,
     ac_output_hertz: Vec<Option<f64>>,
     /// The bucket width used, in seconds, after any raise to stay under
@@ -242,11 +243,16 @@ pub(super) fn series(
             .battery_percent
             .add(status.battery_percent.map(f64::from));
         current.battery_celsius.add(status.battery_celsius);
+        // The first sample after the output is switched on can read 0 V
+        // and 0 Hz, before the inverter is up.
         if status.ac_output == Some(true) {
-            current.ac_output_volts.add(status.ac_output_volts);
+            let up = |value: &f64| *value > 0.0;
+            current
+                .ac_output_volts
+                .add(status.ac_output_volts.filter(up));
             current
                 .ac_output_hertz
-                .add(status.ac_output_hertz.map(f64::from));
+                .add(status.ac_output_hertz.map(f64::from).filter(up));
         }
         true
     })?;
@@ -395,9 +401,11 @@ mod tests {
             }
             .to_string()
         };
-        // One bucket on, then one off.
+        // One bucket on, after a sample from before the inverter was up,
+        // then one off.
         let lines = [
-            line(0, 1, 1200, 60),
+            line(0, 1, 0, 0),
+            line(3, 1, 1200, 60),
             line(5, 1, 1220, 60),
             line(10, 0, 0, 0),
         ]
