@@ -4,7 +4,7 @@
 
 CARGO ?= cargo
 
-.PHONY: all build ci fmt fmt-check clippy test web-deps test-web deb
+.PHONY: all build ci fmt fmt-check clippy test web-deps test-web screenshot deb
 
 all: build
 
@@ -36,6 +36,15 @@ web-deps:
 # `make web-deps` once.
 test-web:
 	cd $(WEB_TESTS) && npm test
+
+# The README's screenshot, from a running daemon.  Needs `make
+# web-deps` once.
+SCREENSHOT_DAEMON ?= http://127.0.0.1:9888
+# One day of history.
+SCREENSHOT_LAST ?= 86400
+screenshot:
+	cd $(WEB_TESTS) && PLAYWRIGHT_BROWSERS_PATH=0 node screenshot.mjs \
+		$(SCREENSHOT_DAEMON) $(SCREENSHOT_LAST) $(CURDIR)/docs/images/web.png
 
 deb:
 	cargo deb -p jackerymon-cli

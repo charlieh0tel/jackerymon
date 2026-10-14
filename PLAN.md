@@ -7,9 +7,7 @@ and measurements belong in [FINDINGS.md](FINDINGS.md), not here.
 ## Goal
 
 A Rust workspace for monitoring Jackery units over BLE: a library, a
-logging daemon, a TUI, and a Prometheus exporter.  The Explorer protocol
-was proven with a small Python PoC, then ported; the PoC was removed
-once the Rust key fetch matched it (it remains in git history).
+logging daemon, a TUI, a web view, and a Prometheus exporter.
 
 ## Decisions
 
@@ -27,8 +25,7 @@ once the Rust key fetch matched it (it remains in git history).
   account owns the unit).
 - **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
   interactive commands, `/etc/jackerymon/` for the daemon; `--unit
-  SERIAL` chooses, and is optional when one key is present.  The file
-  format is the PoC's, so keys it wrote still load.
+  SERIAL` chooses, and is optional when one key is present.
 - **Several units: one daemon per unit.**  Each instance owns one unit's
   connection and port; one adapter can hold several connections.  The
   package's unit serves one unit; a template (`jackerymon@<serial>`)
@@ -78,7 +75,8 @@ once the Rust key fetch matched it (it remains in git history).
 
 - **One program, subcommands.**  `crates/jackerymon` is the library
   (typed errors, no `anyhow`); `crates/jackerymon-cli` builds the single
-  `jackerymon` binary: `poll`, `set`, `tui`, `daemon`.
+  `jackerymon` binary: `poll`, `scan`, `key`, `set`, `tui`, `daemon`,
+  `compress-logs`.
 - **The unit takes one BLE connection, so one process holds it.**  Every
   command that uses BLE takes `/run/lock/jackerymon-<serial>.lock`, one
   file shared by all users and the system daemon (sticky directory,
@@ -103,9 +101,9 @@ once the Rust key fetch matched it (it remains in git history).
   `GET /metrics` (Prometheus), `GET /status`, `GET /events` (server-sent
   events, current state first), `GET /history` (logged samples between
   two RFC 3339 times, streamed as JSON lines from the daily files,
-  gzipped or not; the TUI fetches its chart window from it), `POST
-  /settings` (the unit's one-key
-  body; answers once status confirms it, within 60 s including
+  gzipped or not; the TUI fetches its chart window from it), `GET
+  /series` and the web view (below), and `POST /settings` (the unit's
+  one-key body; answers once status confirms it, within 60 s including
   queueing).  TCP, `127.0.0.1:9888` by default, serves the read-only
   routes unless `--tcp-control`.  A daemon refuses to start while
   another answers on its socket, and replaces a dead one's leftover.
@@ -120,7 +118,8 @@ once the Rust key fetch matched it (it remains in git history).
   smartclock-web; served by the daemon rather than a separate process,
   since one daemon owns one unit.  `/series` averages samples into
   intervals of at most 5,000 points; `/status` carries the reading
-  worded as the TUI words it (`text.rs`).  Playwright tests fake the API
+  worded as the TUI words it (`text.rs`), and the
+  footer's author, license and repository from Cargo metadata.  Playwright tests fake the API
   per test; because the daemon needs a key and an adapter to start, they
   serve the page's files from the tree, and a Rust test checks the
   daemon serves the same paths.
@@ -142,9 +141,8 @@ once the Rust key fetch matched it (it remains in git history).
 - **License: MIT OR Apache-2.0.**
 - **The daemon runs as system user and group `jackerymon`,** from
   `debian/jackerymon.sysusers`, which cargo-deb (3.8 and later) installs
-  and applies in `postinst`.  v0.1.0 also carried a hand-written
-  sysusers call; cargo-deb 3.8 then added one naming the source file,
-  which failed and left the package unconfigured.  Group members may use
+  and applies in `postinst`; the package has no hand-written maintainer
+  scripts, so none can duplicate it.  Group members may use
   the socket in `/run/jackerymon` and read keys in `/etc/jackerymon`.
   The unit is installed disabled: it needs a key first.
 - **`/etc/default/jackerymon` sets TCP:** `JACKERYMON_LISTEN` and

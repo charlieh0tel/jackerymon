@@ -118,9 +118,16 @@ function render(s) {
       ? `<span class="pill stale">temperature ${esc(v.temperature_alarm)}</span>`
       : "") +
     (s.link?.state === "lost" ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
-  $("colophon").innerHTML =
-    `Jackery ${esc(s.serial)} · jackerymon ${esc(s.version ?? "")} · read-only · ` +
-    `<a href="https://github.com/charlieh0tel/jackerymon">source</a>`;
+  const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
+  $("colophon").innerHTML = [
+    `Jackery ${esc(s.serial)}`,
+    `jackerymon ${esc(s.version ?? "")}`,
+    "read-only",
+    `© ${esc(s.author ?? "")}`,
+    esc(s.license ?? ""),
+    link(s.repository, "source"),
+    link(`${s.repository}/issues`, "issues"),
+  ].join(" · ");
 }
 
 // ------------------------------------------------------------ lifecycle

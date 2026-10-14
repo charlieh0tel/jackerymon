@@ -20,7 +20,13 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   await expect(strip).toContainText("412 W");
   await expect(strip).toContainText("24.1 °C");
   await expect(strip).toContainText("charging");
-  await expect(page.locator("#colophon")).toContainText("Jackery 855125071405677");
+  const colophon = page.locator("#colophon");
+  await expect(colophon).toContainText("Jackery 855125071405677");
+  await expect(colophon).toContainText("© Christopher Hoover");
+  await expect(colophon.locator("a", { hasText: "issues" })).toHaveAttribute(
+    "href",
+    "https://github.com/charlieh0tel/jackerymon/issues",
+  );
 });
 
 test("an old reading is stale, a lost link says why", async ({ page }) => {

@@ -105,9 +105,19 @@ async fn status(State(shared): State<Arc<Shared>>) -> Json<Value> {
         "connections": snapshot.connections,
         "transport_failures": snapshot.transport_failures,
         "version": env!("CARGO_PKG_VERSION"),
+        "author": author(),
+        "license": env!("CARGO_PKG_LICENSE"),
+        "repository": env!("CARGO_PKG_REPOSITORY"),
         "view": snapshot.latest.as_ref().and_then(|latest| latest.status.as_ref()).map(View::from),
         "latest": snapshot.latest.map(|latest| latest.record),
     }))
+}
+
+/// The first author's name, without the address.
+fn author() -> &'static str {
+    let authors = env!("CARGO_PKG_AUTHORS");
+    let first = authors.split(':').next().unwrap_or(authors);
+    first.split(" <").next().unwrap_or(first)
 }
 
 /// A page or asset built into the binary.
@@ -300,10 +310,17 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::SettingQuery;
+    use super::author;
     use super::parse_setting;
     use super::settings;
     use crate::daemon::COMMAND_BUFFER;
     use crate::daemon::Shared;
+
+    #[test]
+    fn author_is_a_name_without_an_address() {
+        assert!(!author().is_empty());
+        assert!(!author().contains(['<', '>', '@', ':']), "{}", author());
+    }
 
     #[test]
     fn parses_one_key_bodies_only() {
