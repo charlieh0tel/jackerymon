@@ -17,13 +17,15 @@ Tested: one Explorer 2000 (app model code 12, advertises as `HT`), from
 a laptop with an Intel Bluetooth controller, Ubuntu 25.04, Linux 6.14,
 and BlueZ 5.79.
 
-Expected: any Linux machine whose adapter BlueZ supports.  Other
-Explorers in the app's `HT` line probably share the protocol, but some
-use a codec variant with an IV; jackerymon refuses any model but 12
-until one is tested.  The Explorer 2000 Ultra (`HL` line) uses a
-different protocol and will not work.  HomePower units (app model codes
-3001-3004) encrypt BLE frames with AES-CBC instead of RC4 and likely use
-other status keys; support awaits a unit to test.
+Other units:
+
+- Other Explorers that advertise as `HT`: probably the same protocol,
+  but some add an IV to the cipher.  jackerymon refuses any model but
+  12 until one is tested; reports welcome on the
+  [issues page](https://github.com/charlieh0tel/jackerymon/issues).
+- Explorer 2000 Ultra (`HL`): a different protocol; will not work.
+- HomePower (models 3001-3004): AES instead of RC4, and likely other
+  status keys; support awaits a unit to test.
 
 ## Wi-Fi and Bluetooth
 
