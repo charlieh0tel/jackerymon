@@ -70,12 +70,13 @@ test("the unit table lists what the unit reports, read-only", async ({ page }) =
   await expect(page.locator("#unit button, #unit input, #unit select")).toHaveCount(0);
 });
 
-test("two charts are drawn from /series for the default range", async ({ page }) => {
+test("three charts are drawn from /series for the default range", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   await expect(page.locator("#charts")).toContainText("Power");
-  await expect(page.locator("#charts")).toContainText("Battery");
+  await expect(page.locator("#charts")).toContainText("Charge");
+  await expect(page.locator("#charts")).toContainText("Temperature");
   const q = fake.query.series;
   const span = (Date.parse(q.get("until")) - Date.parse(q.get("since"))) / 1000;
   expect(span).toBe(21600);
@@ -85,7 +86,7 @@ test("two charts are drawn from /series for the default range", async ({ page })
 test("a range button reads that range and keeps it in the address", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   await page.locator("#ranges button", { hasText: "7 d" }).click();
   await expect(page).toHaveURL(/last=604800/);
   await expect

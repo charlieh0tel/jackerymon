@@ -14,13 +14,13 @@ test("the charts' time axes line up when drawing them adds a scrollbar", async (
   await page.setViewportSize({ width: 1000, height: 800 });
   await fake.install(page);
   await page.goto("/");
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const plots = page.locator("#charts .u-over");
   const boxes = () =>
     plots.evaluateAll((all) => all.map((p) => p.getBoundingClientRect()).map(({ left, width }) => ({ left, width })));
   await expect.poll(async () => {
-    const [power, battery] = await boxes();
-    return battery.width === power.width && battery.left === power.left;
+    const [first, ...rest] = await boxes();
+    return rest.every(({ left, width }) => left === first.left && width === first.width);
   }).toBe(true);
   // And they fill the panel as it is now, not as it was.
   const [power] = await boxes();

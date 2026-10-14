@@ -112,8 +112,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   signal or fatal error, HTTP stops too and the daemon exits with the
   polling result, so a supervisor sees failures.
 - **Web view, after smartclock-web.**  The daemon serves one page at
-  `/` over TCP, read-only: a status strip polled every second, power and
-  battery charts over 10 min to 7 d, and the unit's settings.  Same
+  `/` over TCP, read-only: a status strip polled every second; power,
+  charge and temperature charts over 10 min to 7 d, one y axis each so
+  their time axes line up; and the unit's settings.  Same
   look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
   smartclock-web; served by the daemon rather than a separate process,
   since one daemon owns one unit.  `/series` averages samples into
