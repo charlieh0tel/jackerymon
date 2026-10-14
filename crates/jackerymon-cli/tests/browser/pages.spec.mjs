@@ -103,6 +103,15 @@ const batteryTicks = (page) =>
     return { left: at(1), right: at(2), percent: u.scales["%"], celsius: u.scales["°C"] };
   });
 
+test("hovering a chart draws one vertical line on each chart and no horizontal one", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await page.locator("#charts .u-over").first().hover();
+  await expect(page.locator("#charts .u-cursor-x")).toHaveCount(2);
+  await expect(page.locator("#charts .u-cursor-y")).toHaveCount(0);
+});
+
 test("the battery chart's right axis ticks fall on the left axis gridlines", async ({ page }) => {
   const fake = new Fake();
   fake.series.battery_percent = fake.series.battery_percent.map((_, i) => 99 + (i % 2));

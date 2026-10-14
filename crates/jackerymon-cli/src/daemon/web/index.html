@@ -91,7 +91,9 @@ function chart(title, data, series, axes, scales = {}) {
       height: CHART_HEIGHT,
       // null leaves a side to uPlot, which pads nothing beside an axis.
       padding: [null, right ? null : RIGHT_ROOM, null, null],
-      cursor: { sync: { key: SYNC.key } },
+      // No horizontal crosshair: the charts' y scales differ, and uPlot
+      // parks a synced chart's line just above its plot, where it shows.
+      cursor: { y: false, sync: { key: SYNC.key } },
       series: [{}, ...series],
       axes: [{ stroke: "#8b929c", grid: { stroke: "#2b3038" } }, ...axes],
       scales: { x: { time: true }, ...scales },
