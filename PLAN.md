@@ -118,6 +118,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   and battery charts over 10 min to 7 d; and the unit's settings.  The
   power chart draws each input source that delivered anything in the
   window, under a thin line for the reported total they should sum to.
+  An AC output chart, volts and hertz averaged only while the output
+  is on, appears when it was on in the window.  A right axis's range
+  is centered on its data, so a steady 60 Hz sits mid-chart.
   Y axes have fixed widths, and a chart without a right axis pads the
   same room, so the time axes line up.  A right axis takes the left's
   number of divisions, each a round step, so its ticks fall on the

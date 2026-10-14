@@ -124,6 +124,47 @@ test("each input source that delivered something gets its own line", async ({ pa
   expect(labels).not.toContain("car input W");
 });
 
+// A series fixture with the AC output on for the second half of the
+// window, at a steady 60 Hz and a drifting voltage.
+function acOutputOn(fake) {
+  const n = fake.series.time.length;
+  fake.series.ac_output_volts = fake.series.time.map((_, i) => (i < n / 2 ? null : 120 + (i % 5) / 2));
+  fake.series.ac_output_hertz = fake.series.time.map((_, i) => (i < n / 2 ? null : 60));
+}
+
+test("the AC output chart appears only when the output was on in the window", async ({ page }) => {
+  const fake = new Fake();
+  fake.series.ac_output_volts = fake.series.time.map(() => null);
+  fake.series.ac_output_hertz = fake.series.time.map(() => null);
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  acOutputOn(fake);
+  await page.reload();
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts")).toContainText("AC output");
+});
+
+test("the AC output chart's hertz ticks fall on its voltage gridlines, and it lines up", async ({ page }) => {
+  const fake = new Fake();
+  acOutputOn(fake);
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  const { left, right, hz } = await page.evaluate(() => {
+    const u = charts[2];
+    const at = (axis) => u.axes[axis]._splits.map((v) => Math.round(u.valToPos(v, u.axes[axis].scale)));
+    return { left: at(1), right: at(2), hz: u.scales.Hz };
+  });
+  expect(left.length).toBeGreaterThan(2);
+  expect(right).toEqual(left);
+  // A steady 60 Hz still gets a range around it.
+  expect(hz.min).toBeLessThan(60);
+  expect(hz.max).toBeGreaterThan(60);
+  const boxes = await page
+    .locator("#charts .u-over")
+    .evaluateAll((plots) => plots.map((p) => p.getBoundingClientRect()).map(({ left, width }) => ({ left, width })));
+  expect(boxes[2]).toEqual(boxes[0]);
+});
+
 // Where each tick of the battery chart's two y axes falls, in pixels,
 // and the scale ranges, from the page's own uPlot instance.
 const batteryTicks = (page) =>

@@ -49,6 +49,8 @@ const TOTAL_WIDTH = 1;
 const OUTPUT = "#fbbf24";
 const BATTERY = "#38bdf8";
 const TEMPERATURE = "#f87171";
+const VOLTS = "#e2e8f0";
+const HERTZ = "#2dd4bf";
 // Dashes mark a line the unit does not report.
 const ESTIMATE_DASH = [6, 4];
 // About this many points per chart, whatever the window.
@@ -70,6 +72,10 @@ const STEP_MANTISSAS = [1, 2, 2.5, 5];
 // The smallest steps worth a tick: whole percent, half a degree.
 const PERCENT_STEP = 1;
 const CELSIUS_STEP = 0.5;
+// Volts come in tenths and hertz whole, but a step under 1 of either
+// only magnifies noise.
+const VOLT_STEP = 1;
+const HERTZ_STEP = 1;
 const FULL = 100;
 // Hovering one chart moves the cursor on the others.
 const SYNC = haveUplot ? uPlot.sync("jackerymon") : null;
@@ -130,12 +136,13 @@ function roundStep(least) {
   }
 }
 
-// A range of `divisions` round steps covering [low, high], below
-// `ceiling` when it can be.
+// A range of `divisions` round steps covering [low, high], as near
+// centered on it as the steps allow, and below `ceiling` when it can be.
 function fit({ low, high, least, ceiling = Infinity }, divisions) {
   for (let step = roundStep(Math.max(least, (high - low) / divisions)); ; step = roundStep(step * 1.000001)) {
     const decimals = stepDecimals(step);
-    let min = Number((Math.floor(low / step + 1e-9) * step).toFixed(decimals));
+    const centered = (low + high) / 2 - (divisions * step) / 2;
+    let min = Number((Math.floor(centered / step + 1e-9) * step).toFixed(decimals));
     if (min + divisions * step > ceiling && ceiling - divisions * step <= low) min = ceiling - divisions * step;
     const max = min + divisions * step;
     if (max >= high - 1e-9) return { min, max, step, decimals, divisions };
@@ -234,6 +241,25 @@ async function load(signal) {
       { "%": alignedScale(percent), "°C": alignedScale(celsius) },
     ),
   ];
+  // Only while the AC output was on at some point in the window.
+  if (s.ac_output_volts?.some((v) => v != null)) {
+    const [volts, hertz] = aligned([extent(s.ac_output_volts, VOLT_STEP), extent(s.ac_output_hertz, HERTZ_STEP)]);
+    charts.push(
+      chart(
+        "AC output",
+        [s.time, s.ac_output_volts, s.ac_output_hertz],
+        [
+          { label: "voltage V", stroke: VOLTS, scale: "V" },
+          { label: "frequency Hz", stroke: HERTZ, scale: "Hz" },
+        ],
+        [
+          { ...yAxis("V", "V"), ...alignedTicks(volts) },
+          { ...rightAxis("Hz", "Hz"), ...alignedTicks(hertz) },
+        ],
+        { V: alignedScale(volts), Hz: alignedScale(hertz) },
+      ),
+    );
+  }
 }
 
 // The unit's settings and inputs as the strip last read them; nothing

@@ -111,6 +111,9 @@ pub(super) struct Series {
     output_watts: Vec<Option<f64>>,
     battery_percent: Vec<Option<f64>>,
     battery_celsius: Vec<Option<f64>>,
+    /// Over samples with the AC output on; null when it was off.
+    ac_output_volts: Vec<Option<f64>>,
+    ac_output_hertz: Vec<Option<f64>>,
     /// The bucket width used, in seconds, after any raise to stay under
     /// the point limit.
     every: i64,
@@ -127,6 +130,8 @@ struct Bucket {
     output_watts: Mean,
     battery_percent: Mean,
     battery_celsius: Mean,
+    ac_output_volts: Mean,
+    ac_output_hertz: Mean,
 }
 
 /// A mean built one value at a time.
@@ -168,6 +173,8 @@ impl Series {
         self.output_watts.push(bucket.output_watts.value());
         self.battery_percent.push(bucket.battery_percent.value());
         self.battery_celsius.push(bucket.battery_celsius.value());
+        self.ac_output_volts.push(bucket.ac_output_volts.value());
+        self.ac_output_hertz.push(bucket.ac_output_hertz.value());
     }
 }
 
@@ -235,6 +242,12 @@ pub(super) fn series(
             .battery_percent
             .add(status.battery_percent.map(f64::from));
         current.battery_celsius.add(status.battery_celsius);
+        if status.ac_output == Some(true) {
+            current.ac_output_volts.add(status.ac_output_volts);
+            current
+                .ac_output_hertz
+                .add(status.ac_output_hertz.map(f64::from));
+        }
         true
     })?;
     if let Some(bucket) = bucket {
@@ -361,6 +374,43 @@ mod tests {
         assert_eq!(series.car_input_watts, [Some(20.0)]);
         // Solar is reported in tenths of a watt.
         assert_eq!(series.solar_input_watts, [Some(30.0)]);
+    }
+
+    #[test]
+    fn ac_output_is_averaged_only_while_on() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-acout-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let line = |second: u32, on: u32, volts: u32, hertz: u32| {
+            SampleRecord {
+                timestamp: format!("2026-10-11T12:00:{second:02}+00:00"),
+                sample: 0,
+                connection: 1,
+                transport_failures: 0,
+                query_ms: 1.0,
+                status: json!({"oac": on, "acov": volts, "acohz": hertz})
+                    .as_object()
+                    .expect("object")
+                    .clone(),
+            }
+            .to_string()
+        };
+        // One bucket on, then one off.
+        let lines = [
+            line(0, 1, 1200, 60),
+            line(5, 1, 1220, 60),
+            line(10, 0, 0, 0),
+        ]
+        .join("\n");
+        fs::write(directory.join("2026-10-11.jsonl"), format!("{lines}\n")).expect("log");
+        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+            .expect("time")
+            .to_utc();
+        let series =
+            series(&directory, noon, noon + chrono::Duration::seconds(15), 10).expect("series");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert_eq!(series.ac_output_volts, [Some(121.0), None]);
+        assert_eq!(series.ac_output_hertz, [Some(60.0), None]);
     }
 
     #[test]
