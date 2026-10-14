@@ -199,18 +199,28 @@ test("the battery chart's right axis ticks fall on the left axis gridlines", asy
   expect(celsius.max).toBeGreaterThanOrEqual(27.4 + 5.9);
 });
 
-test("y axes have no titles, and each one's numbers take its line's color", async ({ page }) => {
+test("y axes have no titles; each number carries its unit in its line's color", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
   await expect(page.locator("#charts .uplot")).toHaveCount(2);
   const axes = await page.evaluate(() => {
     const u = charts[1];
-    return [1, 2].map((i) => ({ label: u.axes[i].label ?? null, number: u.axes[i].stroke(u, i), line: u.series[i].stroke(u, i) }));
+    return [1, 2].map((i) => ({
+      label: u.axes[i].label ?? null,
+      number: u.axes[i].stroke(u, i),
+      line: u.series[i].stroke(u, i),
+      text: u.axes[i]._values,
+    }));
   });
   for (const { label, number, line } of axes) {
     expect(label).toBeNull();
     expect(number).toBe(line);
   }
+  expect(axes[0].text.every((t) => t.endsWith(" %"))).toBe(true);
+  expect(axes[1].text.every((t) => t.endsWith(" °C"))).toBe(true);
+  const power = await page.evaluate(() => charts[0].axes[1]._values);
+  expect(power.length).toBeGreaterThan(1);
+  expect(power.every((t) => t.endsWith(" W"))).toBe(true);
 });
 
 test("flat or missing battery data still gets ticks on both axes", async ({ page }) => {

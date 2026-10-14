@@ -60,9 +60,10 @@ const CHART_EVERY = 30000;
 const CHART_HEIGHT = 180;
 // Y axes have a fixed width, and a chart without a right axis reserves
 // the same room on the right, so the charts' plot areas, and with them
-// their time axes, line up.  An axis has no title; its numbers take the
-// color of the line they measure, and the legend gives the unit.
-const AXIS_SIZE = 60;
+// their time axes, line up.  An axis has no title: each number carries
+// its unit, in the color of the line it measures.  Wide enough for
+// "1000 W" and "32.5 °C".
+const AXIS_SIZE = 70;
 const AXIS_DIM = "#8b929c";
 // How many divisions a chart's y axes may have; fewer first, so a tie
 // takes the roomier.
@@ -114,9 +115,11 @@ function chart(title, data, series, axes, scales = {}) {
   );
 }
 
-// A left y axis, with its gridlines, its numbers in `stroke`.
-const yAxis = (scale, stroke = AXIS_DIM) => ({
+// A left y axis on the scale named for its unit, with its gridlines,
+// its numbers in `stroke`, on the ticks of aligned fit `f` if given.
+const yAxis = (scale, stroke = AXIS_DIM, f = null) => ({
   scale, size: AXIS_SIZE, stroke, grid: { stroke: "#2b3038" },
+  ...unitValues(scale, f), ...(f ? alignedTicks(f) : {}),
 });
 
 // Decimals a tick needs at `step`: 0 for 5, 1 for 0.5, 2 for 0.25.
@@ -175,13 +178,19 @@ function extent(values, least) {
 const alignedScale = (f) => ({ range: () => [f.min, f.max] });
 const alignedTicks = (f) => ({
   splits: () => Array.from({ length: f.divisions + 1 }, (_, i) => Number((f.min + i * f.step).toFixed(f.decimals))),
-  values: (u, ticks) => ticks.map((t) => t.toFixed(f.decimals)),
+});
+
+// Tick numbers with their unit, to the decimals of an aligned fit, or
+// as uPlot chose them, less floating-point noise.
+const unitValues = (unit, f) => ({
+  values: (u, ticks) => ticks.map((t) => `${f ? t.toFixed(f.decimals) : Number(t.toFixed(6))} ${unit}`),
 });
 
 // A right y axis, on ticks aligned with the left's, so it draws no
 // gridlines of its own.
-const rightAxis = (scale, stroke) => ({
+const rightAxis = (scale, stroke, f) => ({
   scale, side: 1, size: AXIS_SIZE, stroke, grid: { show: false },
+  ...unitValues(scale, f), ...alignedTicks(f),
 });
 
 async function load(signal) {
@@ -235,8 +244,8 @@ async function load(signal) {
         { label: "temperature °C", stroke: TEMPERATURE, scale: "°C" },
       ],
       [
-        { ...yAxis("%", BATTERY), ...alignedTicks(percent) },
-        { ...rightAxis("°C", TEMPERATURE), ...alignedTicks(celsius) },
+        yAxis("%", BATTERY, percent),
+        rightAxis("°C", TEMPERATURE, celsius),
       ],
       { "%": alignedScale(percent), "°C": alignedScale(celsius) },
     ),
@@ -253,8 +262,8 @@ async function load(signal) {
           { label: "frequency Hz", stroke: HERTZ, scale: "Hz" },
         ],
         [
-          { ...yAxis("V", VOLTS), ...alignedTicks(volts) },
-          { ...rightAxis("Hz", HERTZ), ...alignedTicks(hertz) },
+          yAxis("V", VOLTS, volts),
+          rightAxis("Hz", HERTZ, hertz),
         ],
         { V: alignedScale(volts), Hz: alignedScale(hertz) },
       ),
