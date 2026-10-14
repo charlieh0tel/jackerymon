@@ -120,7 +120,12 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   window, under a thin line for the reported total they should sum to.
   An AC output chart, volts and hertz averaged only while the output
   is on, appears when it was on in the window.  A right axis's range
-  is centered on its data, so a steady 60 Hz sits mid-chart.
+  is centered on its data, so a steady 60 Hz sits mid-chart.  Under
+  the charts, a state strip: AC and DC output on, input and output
+  power flowing, fault or temperature alarm, and no data; a band marks
+  any interval the state held in at all, fainter for part of it, so a
+  brief fault shows at 7 d.  It uses power above zero rather than the
+  unit's battery state, which reads idle while charging (FINDINGS.md).
   Y axes have fixed widths, and a chart without a right axis pads the
   same room, so the time axes line up.  Y axes have no rotated titles;
   each number carries its unit, in its line's color.  A right axis takes the left's

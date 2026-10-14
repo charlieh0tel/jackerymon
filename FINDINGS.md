@@ -382,6 +382,18 @@ disconnect. The same ten minutes with the unit beside the laptop gave
 (maximum 310.2 ms). The failures were signal strength, not reconnect
 timing, so retry delays stay as they are.
 
+## Battery state never leaves idle (2026-10-13)
+
+In all 15,418 samples the daemon logged from 2026-10-12 to 2026-10-13,
+`bs` was 0 (idle): 307 of them with input power (AC charging at up to
+786 W, charge 99 %) and 794 with output power.  The charge never fell
+below 99 %, so whether `bs` reports charging or discharging further
+from full is unknown.  The web view's state strip uses input and
+output power above zero instead.
+
+In the same samples, `acip + cip + acpsp/10` equaled `ip` every time,
+but `cip` and `acpsp` were always 0, so only the AC path is confirmed.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

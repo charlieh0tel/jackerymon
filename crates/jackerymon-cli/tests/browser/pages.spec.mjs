@@ -70,10 +70,10 @@ test("the unit table lists what the unit reports, read-only", async ({ page }) =
   await expect(page.locator("#unit button, #unit input, #unit select")).toHaveCount(0);
 });
 
-test("two charts are drawn from /series for the default range", async ({ page }) => {
+test("two charts and the state strip are drawn from /series for the default range", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   await expect(page.locator("#charts")).toContainText("Power");
   await expect(page.locator("#charts")).toContainText("Battery");
   const q = fake.query.series;
@@ -104,7 +104,7 @@ const powerLabels = (page) => page.evaluate(() => charts[0].series.slice(1).map(
 test("input sources that delivered nothing in the window get no line", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   expect(await powerLabels(page)).toEqual([
     "AC input W",
     "input W",
@@ -118,7 +118,7 @@ test("each input source that delivered something gets its own line", async ({ pa
   fake.series.solar_input_watts = fake.series.solar_input_watts.map((v, i) => (i === 3 ? 120 : v));
   fake.series.car_input_watts = fake.series.car_input_watts.map(() => null);
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const labels = await powerLabels(page);
   expect(labels).toContain("solar input W");
   expect(labels).not.toContain("car input W");
@@ -137,10 +137,10 @@ test("the AC output chart appears only when the output was on in the window", as
   fake.series.ac_output_volts = fake.series.time.map(() => null);
   fake.series.ac_output_hertz = fake.series.time.map(() => null);
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   acOutputOn(fake);
   await page.reload();
-  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts .uplot")).toHaveCount(4);
   await expect(page.locator("#charts")).toContainText("AC output");
 });
 
@@ -148,7 +148,7 @@ test("the AC output chart's hertz ticks fall on its voltage gridlines, and it li
   const fake = new Fake();
   acOutputOn(fake);
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  await expect(page.locator("#charts .uplot")).toHaveCount(4);
   const { left, right, hz } = await page.evaluate(() => {
     const u = charts[2];
     const at = (axis) => u.axes[axis]._splits.map((v) => Math.round(u.valToPos(v, u.axes[axis].scale)));
@@ -174,10 +174,57 @@ const batteryTicks = (page) =>
     return { left: at(1), right: at(2), percent: u.scales["%"], celsius: u.scales["°C"] };
   });
 
+// The strip's paint at the middle of interval `i` in lane `name`:
+// [red, green, blue, alpha].
+const stripPixel = (page, name, i) =>
+  page.evaluate(([name, i]) => {
+    const u = charts[charts.length - 1];
+    const lanes = LANES.length;
+    const lane = LANES.findIndex(([n]) => n === name);
+    const time = u.data[0];
+    const x = Math.round((u.valToPos(time[i], "x", true) + u.valToPos(time[i + 1], "x", true)) / 2);
+    const y = Math.round(u.valToPos(lanes - lane - 0.5, "lane", true));
+    return [...u.ctx.getImageData(x, y, 1, 1).data];
+  }, [name, i]);
+
+test("the state strip names its lanes", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  const names = await page.evaluate(() => charts[charts.length - 1].axes[1]._values);
+  expect(names).toEqual(["AC out", "DC out", "power in", "power out", "fault", "no data"]);
+});
+
+test("a state held in one interval, even briefly, shows in its lane", async ({ page }) => {
+  const fake = new Fake();
+  fake.series.fault = fake.series.fault.map((_, i) => (i === 10 ? 0.2 : 0));
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  const [r, , , alpha] = await stripPixel(page, "fault", 10);
+  expect(alpha).toBeGreaterThan(0);
+  expect(r).toBeGreaterThan(100);
+  // Not before, not after, and not in a lane that never held.
+  expect((await stripPixel(page, "fault", 9))[3]).toBe(0);
+  expect((await stripPixel(page, "fault", 11))[3]).toBe(0);
+  expect((await stripPixel(page, "AC out", 10))[3]).toBe(0);
+});
+
+test("a gap in the series shows as no data, and nothing else there", async ({ page }) => {
+  const fake = new Fake();
+  for (const [key, column] of Object.entries(fake.series)) {
+    if (Array.isArray(column) && key !== "time") column[20] = null;
+  }
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
+  expect((await stripPixel(page, "no data", 20))[3]).toBeGreaterThan(0);
+  expect((await stripPixel(page, "no data", 19))[3]).toBe(0);
+  expect((await stripPixel(page, "power in", 20))[3]).toBe(0);
+});
+
 test("dragging across a chart does not zoom it", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const scale = () => page.evaluate(() => ({ min: charts[0].scales.x.min, max: charts[0].scales.x.max }));
   const before = await scale();
   const box = await page.locator("#charts .u-over").first().boundingBox();
@@ -191,9 +238,9 @@ test("dragging across a chart does not zoom it", async ({ page }) => {
 test("hovering a chart draws one vertical line on each chart and no horizontal one", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   await page.locator("#charts .u-over").first().hover();
-  await expect(page.locator("#charts .u-cursor-x")).toHaveCount(2);
+  await expect(page.locator("#charts .u-cursor-x")).toHaveCount(3);
   await expect(page.locator("#charts .u-cursor-y")).toHaveCount(0);
 });
 
@@ -202,7 +249,7 @@ test("the battery chart's right axis ticks fall on the left axis gridlines", asy
   fake.series.battery_percent = fake.series.battery_percent.map((_, i) => 99 + (i % 2));
   fake.series.battery_celsius = fake.series.battery_celsius.map((_, i) => 27.4 + i / 10);
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const { left, right, percent, celsius } = await batteryTicks(page);
   expect(left.length).toBeGreaterThan(2);
   expect(right).toEqual(left);
@@ -216,7 +263,7 @@ test("the battery chart's right axis ticks fall on the left axis gridlines", asy
 test("y axes have no titles; each number carries its unit in its line's color", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const axes = await page.evaluate(() => {
     const u = charts[1];
     return [1, 2].map((i) => ({
@@ -242,7 +289,7 @@ test("flat or missing battery data still gets ticks on both axes", async ({ page
   fake.series.battery_percent = fake.series.battery_percent.map(() => 100);
   fake.series.battery_celsius = fake.series.battery_celsius.map(() => null);
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   const { left, right, percent } = await batteryTicks(page);
   expect(right).toEqual(left);
   expect(percent.max).toBe(100);
@@ -252,7 +299,7 @@ test("flat or missing battery data still gets ticks on both axes", async ({ page
 test("a range button reads that range and keeps it in the address", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(2);
+  await expect(page.locator("#charts .uplot")).toHaveCount(3);
   await page.locator("#ranges button", { hasText: "7 d" }).click();
   await expect(page).toHaveURL(/last=604800/);
   await expect

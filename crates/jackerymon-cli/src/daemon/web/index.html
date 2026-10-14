@@ -62,9 +62,28 @@ const CHART_HEIGHT = 180;
 // the same room on the right, so the charts' plot areas, and with them
 // their time axes, line up.  An axis has no title: each number carries
 // its unit, in the color of the line it measures.  Wide enough for
-// "1000 W" and "32.5 °C".
-const AXIS_SIZE = 70;
+// "1000 W", "32.5 °C" and the state strip's "power out".
+const AXIS_SIZE = 80;
 const AXIS_DIM = "#8b929c";
+// The state strip's lanes, top to bottom: a /series column giving the
+// share of each interval the state held in, and its band's color.  "no
+// data" holds where the series has a gap.
+const LANES = [
+  ["AC out", "ac_output_on", AC_INPUT],
+  ["DC out", "dc_output_on", SOLAR_INPUT],
+  ["power in", "input_flowing", INPUT],
+  ["power out", "output_flowing", OUTPUT],
+  ["fault", "fault", TEMPERATURE],
+  ["no data", null, AXIS_DIM],
+];
+const LANE_HEIGHT = 16;
+// A band fills this much of its lane, so lanes stay apart.
+const BAND_FILL = 0.7;
+// A band for a state held only part of an interval is fainter, down to
+// this opacity; a state held throughout is opaque.
+const BAND_FAINTEST = 0.35;
+// uPlot's default height for the time axis.
+const TIME_AXIS_SIZE = 50;
 // How many divisions a chart's y axes may have; fewer first, so a tie
 // takes the roomier.
 const DIVISIONS = [3, 4];
@@ -270,6 +289,67 @@ async function load(signal) {
       ),
     );
   }
+  charts.push(strip(s));
+}
+
+// Whether row `i` of the series is a gap: every column is null there.
+const isGap = (s, i) => Object.values(s).every((column) => !Array.isArray(column) || column === s.time || column[i] == null);
+
+// The state strip: a lane per state, a band wherever it held, painted
+// directly so that a state held in a single interval still shows.
+function strip(s) {
+  const lanes = LANES.length;
+  const el = document.createElement("div");
+  $("charts").appendChild(el);
+  const paint = (u) => {
+    const { ctx, bbox } = u;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+    ctx.clip();
+    const time = s.time;
+    LANES.forEach(([, column, color], lane) => {
+      const middle = u.valToPos(lanes - lane - 0.5, "lane", true);
+      const half = (u.valToPos(0, "lane", true) - u.valToPos(1, "lane", true)) * BAND_FILL / 2;
+      ctx.fillStyle = color;
+      for (let i = 0; i < time.length; i++) {
+        const share = column === null ? (isGap(s, i) ? 1 : 0) : s[column]?.[i] ?? 0;
+        if (!(share > 0)) continue;
+        const start = u.valToPos(time[i], "x", true);
+        const end = u.valToPos(time[i + 1] ?? time[i] + s.every, "x", true);
+        ctx.globalAlpha = BAND_FAINTEST + (1 - BAND_FAINTEST) * share;
+        ctx.fillRect(start, middle - half, Math.max(1, end - start), half * 2);
+      }
+    });
+    ctx.restore();
+  };
+  return new uPlot(
+    {
+      title: "State",
+      width: $("charts").clientWidth || 800,
+      height: lanes * LANE_HEIGHT + TIME_AXIS_SIZE,
+      padding: [null, AXIS_SIZE, null, null],
+      legend: { show: false },
+      cursor: { y: false, drag: { x: false, y: false }, points: { show: false }, sync: { key: SYNC.key } },
+      // The lane scale needs a series to exist; this one draws nothing.
+      series: [{}, { scale: "lane", show: false }],
+      axes: [
+        { stroke: AXIS_DIM, grid: { stroke: "#2b3038" } },
+        {
+          scale: "lane",
+          size: AXIS_SIZE,
+          stroke: AXIS_DIM,
+          grid: { show: false },
+          splits: () => LANES.map((_, lane) => lanes - lane - 0.5),
+          values: () => LANES.map(([name]) => name),
+        },
+      ],
+      scales: { x: { time: true }, lane: { auto: false, range: [0, lanes] } },
+      hooks: { draw: [paint] },
+    },
+    [s.time, s.time.map(() => null)],
+    el,
+  );
 }
 
 // The unit's settings and inputs as the strip last read them; nothing

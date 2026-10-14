@@ -15,7 +15,7 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 |---|---|---|
 | `rb` | remaining battery | % |
 | `bt` | battery temperature | /10 -> C |
-| `bs` | battery status | 0 idle, 1 charging, 2 discharging |
+| `bs` | battery status; the test unit read 0 even while charging (FINDINGS.md) | 0 idle, 1 charging, 2 discharging |
 | `ip` / `op` | input / output power | W |
 | `it` / `ot` | input / output time remaining | /10 -> h |
 | `oac` / `odc` / `odcu` / `odcc` | AC / DC / USB / car output state | 0/1 |

@@ -8,6 +8,7 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::Utc;
 use jackerymon::status::Status;
+use jackerymon::status::TemperatureAlarm;
 use serde::Serialize;
 
 use super::log;
@@ -115,6 +116,15 @@ pub(super) struct Series {
     /// null when it was off.
     ac_output_volts: Vec<Option<f64>>,
     ac_output_hertz: Vec<Option<f64>>,
+    /// The share of a bucket's samples, 0 to 1, in which each state held.
+    ac_output_on: Vec<Option<f64>>,
+    dc_output_on: Vec<Option<f64>>,
+    /// Input or output power above zero.  The unit's own battery state
+    /// (`bs`) is not used: it reads idle while charging (FINDINGS.md).
+    input_flowing: Vec<Option<f64>>,
+    output_flowing: Vec<Option<f64>>,
+    /// A fault code or a temperature alarm.
+    fault: Vec<Option<f64>>,
     /// The bucket width used, in seconds, after any raise to stay under
     /// the point limit.
     every: i64,
@@ -133,6 +143,11 @@ struct Bucket {
     battery_celsius: Mean,
     ac_output_volts: Mean,
     ac_output_hertz: Mean,
+    ac_output_on: Mean,
+    dc_output_on: Mean,
+    input_flowing: Mean,
+    output_flowing: Mean,
+    fault: Mean,
 }
 
 /// A mean built one value at a time.
@@ -176,6 +191,24 @@ impl Series {
         self.battery_celsius.push(bucket.battery_celsius.value());
         self.ac_output_volts.push(bucket.ac_output_volts.value());
         self.ac_output_hertz.push(bucket.ac_output_hertz.value());
+        self.ac_output_on.push(bucket.ac_output_on.value());
+        self.dc_output_on.push(bucket.dc_output_on.value());
+        self.input_flowing.push(bucket.input_flowing.value());
+        self.output_flowing.push(bucket.output_flowing.value());
+        self.fault.push(bucket.fault.value());
+    }
+}
+
+/// Whether the unit reports a fault code or a temperature alarm; `None`
+/// when it reports neither key.
+fn fault(status: &Status) -> Option<bool> {
+    let code = status.error_code.map(|code| code != 0);
+    let alarm = status
+        .temperature_alarm
+        .map(|alarm| alarm != TemperatureAlarm::None);
+    match (code, alarm) {
+        (None, None) => None,
+        (code, alarm) => Some(code.unwrap_or(false) || alarm.unwrap_or(false)),
     }
 }
 
@@ -254,6 +287,16 @@ pub(super) fn series(
                 .ac_output_hertz
                 .add(status.ac_output_hertz.map(f64::from).filter(up));
         }
+        let share = |held: bool| if held { 1.0 } else { 0.0 };
+        current.ac_output_on.add(status.ac_output.map(share));
+        current.dc_output_on.add(status.dc_output.map(share));
+        current
+            .input_flowing
+            .add(status.input_watts.map(|watts| share(watts > 0)));
+        current
+            .output_flowing
+            .add(status.output_watts.map(|watts| share(watts > 0)));
+        current.fault.add(fault(&status).map(share));
         true
     })?;
     if let Some(bucket) = bucket {
@@ -419,6 +462,56 @@ mod tests {
         fs::remove_dir_all(&directory).expect("cleanup");
         assert_eq!(series.ac_output_volts, [Some(121.0), None]);
         assert_eq!(series.ac_output_hertz, [Some(60.0), None]);
+    }
+
+    #[test]
+    fn states_are_the_share_of_samples_they_held_in() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-states-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        let line = |second: u32, status: serde_json::Value| {
+            SampleRecord {
+                timestamp: format!("2026-10-11T12:00:{second:02}+00:00"),
+                sample: 0,
+                connection: 1,
+                transport_failures: 0,
+                query_ms: 1.0,
+                status: status.as_object().expect("object").clone(),
+            }
+            .to_string()
+        };
+        let lines = [
+            line(
+                0,
+                json!({"oac": 1, "odc": 0, "ip": 300, "op": 0, "ec": 0, "ta": 0}),
+            ),
+            line(
+                2,
+                json!({"oac": 1, "odc": 0, "ip": 0, "op": 40, "ec": 0, "ta": 1}),
+            ),
+            line(
+                4,
+                json!({"oac": 0, "odc": 0, "ip": 0, "op": 40, "ec": 3, "ta": 0}),
+            ),
+            line(
+                6,
+                json!({"oac": 0, "odc": 0, "ip": 0, "op": 0, "ec": 0, "ta": 0}),
+            ),
+        ]
+        .join("\n");
+        fs::write(directory.join("2026-10-11.jsonl"), format!("{lines}\n")).expect("log");
+        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+            .expect("time")
+            .to_utc();
+        let series =
+            series(&directory, noon, noon + chrono::Duration::seconds(8), 10).expect("series");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert_eq!(series.ac_output_on, [Some(0.5)]);
+        assert_eq!(series.dc_output_on, [Some(0.0)]);
+        assert_eq!(series.input_flowing, [Some(0.25)]);
+        assert_eq!(series.output_flowing, [Some(0.5)]);
+        // A temperature alarm and a fault code each count.
+        assert_eq!(series.fault, [Some(0.5)]);
     }
 
     #[test]
