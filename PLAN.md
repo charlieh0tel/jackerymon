@@ -52,7 +52,7 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   `None`; wrong types fail; unknown enum values are kept as `Unknown`.
   The unit reports no battery current or power, and nothing derives
   one.  Input minus output, once drawn as an estimate, missed the
-  unit's own draw: about 46 W while the AC output is on (FINDINGS.md).
+  unit's own draw: about 48 W while the AC output is on (FINDINGS.md).
 - **Polling lives in the library.**  It is generic over a small
   connector/link pair so its retry policy is tested offline.  Events go
   to a callback that can stop polling; a stop future also closes the

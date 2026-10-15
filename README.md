@@ -13,7 +13,7 @@ cargo test
 
 ## Hardware
 
-Tested: one Explorer 2000 (app model code 12, advertises as `HT`), from
+Tested: one Explorer 2000 v2 (app model code 12, advertises as `HT`), from
 a laptop with an Intel Bluetooth controller, Ubuntu 25.04, Linux 6.14,
 and BlueZ 5.79.
 

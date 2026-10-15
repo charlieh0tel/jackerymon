@@ -9,7 +9,7 @@ monitoring is intended to remain direct.
 
 | Item | Value |
 |---|---|
-| Model | Explorer 2000 (app model code 12) |
+| Model | Explorer 2000 v2, 2042 Wh LiFePO4 (app model code 12) |
 | Wi-Fi | ESP32, DHCP name `espressif`, MAC `90:e5:b1:21:ed:b8` |
 | BLE | advertises as `HT`, MAC `90:E5:B1:21:ED:BA` |
 | App | `com.hbxn.jackery` (Android "Jackery" app) |
@@ -304,8 +304,8 @@ turn off by themselves if no app connects within five minutes. Holding
 DC/USB and AC together turns them on or off; flashing icons mean the
 unit awaits a connection. Holding POWER and DC/USB for three seconds
 resets them to factory settings, reboots, and unbinds the app account.
-Whether the test unit (model code 12) is this model is unconfirmed, but
-the five-minute rule fits the radio-off episodes above, and pressing
+The test unit is an Explorer 2000 v2, not this model, but the
+five-minute rule fits the radio-off episodes above, and pressing
 several buttons restored the radios once. Whether a reset changes the
 BLE key is unknown.
 
@@ -412,25 +412,24 @@ load only) read 0 W apart from 25 readings of 10-17 W.
 
 On battery with AC and DC output on, no loads and the light off, `op`
 read 0 W while the charge fell 100 to 99 % at 21:22:31 UTC and 99 to
-98 % at 21:46:02, 23.5 minutes for one point.  At 20-22 Wh a point
-(2042 or 2160 Wh; the model's capacity is unconfirmed) that is about
-50-55 W of draw the unit does not report.  This is one clean interval
-of a whole-point estimate.
+98 % at 21:46:02, 23.5 minutes for one point.  At 20.4 Wh a point
+(2042 Wh nominal) that is about 52 W of draw the unit does not report.
+This is one clean interval of a whole-point estimate.
 
 With AC output off and DC output on, still no loads, the charge fell 98
 to 97 % at 02:59:59 UTC on 2026-10-15, 5 h 14 min after reaching 98 %,
-and 97 to 96 % at 09:04:34, 6 h 5 min later: about 4 W.  So the AC
-inverter idles at about 46 W, and the rest of the unit at about 4 W.
+and 97 to 96 % at 09:04:34, 6 h 5 min later: about 3.5 W.  So the AC
+inverter idles at about 48 W, and the rest of the unit at about 3.5 W.
 DC output went off at 08:43:05, exactly 12 h after it was turned on,
 as the 12 h energy saving setting (`pm`) did once before (02:30:46 to
 14:30:50 on 2026-10-14); the last 21 minutes ran with both outputs off.
 
 `ot` says nothing about this draw: through 2026-10-14 it read 99.8 or
 99.9 h in all but one sample, whatever outputs were on.  It sits at
-its ceiling; 46 W empties a full pack in about 45 h.
+its ceiling; 48 W empties a full pack in about 42 h.
 
 So input minus output, the web view's battery-power estimate, read 0 W
-while the battery lost about 50 W.  It was dropped in 0.1.10.
+while the battery lost about 52 W.  It was dropped in 0.1.10.
 
 On 2026-10-13 the charge fell to 99 % after about 15.5 hours on mains,
 AC and DC output on with no reported load, and the unit then drew
