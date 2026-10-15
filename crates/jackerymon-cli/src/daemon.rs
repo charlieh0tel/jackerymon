@@ -512,13 +512,16 @@ mod tests {
                     assert!(content_type.starts_with(kind), "{path}: {content_type}");
                     assert_eq!(page.headers()[reqwest::header::CACHE_CONTROL], "no-cache");
                 }
-                let series: serde_json::Value =
-                    reqwest::get(format!("{base}/series?{query}&every=60"))
-                        .await
-                        .expect("series")
-                        .json()
-                        .await
-                        .expect("json");
+                // A fixed end, or the range grows with the clock until
+                // `every` widens to keep under the point cap.
+                let series: serde_json::Value = reqwest::get(format!(
+                    "{base}/series?{query}&until=2026-10-12T00:00:00Z&every=60"
+                ))
+                .await
+                .expect("series")
+                .json()
+                .await
+                .expect("json");
                 // The one sample's minute, among gaps where the range runs
                 // past it.
                 let taken = chrono::DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
