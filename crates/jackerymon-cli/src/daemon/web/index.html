@@ -51,8 +51,6 @@ const BATTERY = "#38bdf8";
 const TEMPERATURE = "#f87171";
 const VOLTS = "#818cf8";
 const HERTZ = "#2dd4bf";
-// Dashes mark a line the unit does not report.
-const ESTIMATE_DASH = [6, 4];
 // About this many points per chart, whatever the window.
 const POINTS = 1500;
 // How often a window ending now is read again.
@@ -227,12 +225,6 @@ async function load(signal) {
     clearCharts("no samples logged in this window");
     return;
   }
-  // The unit reports no battery power.  Input minus output overstates
-  // charging and understates discharge by the losses and the unit's own
-  // draw, so it is drawn as an estimate.
-  const net = s.input_watts.map((input, i) =>
-    input == null || s.output_watts[i] == null ? null : input - s.output_watts[i],
-  );
   const [percent, celsius] = aligned([
     { ...extent(s.battery_percent, PERCENT_STEP), ceiling: FULL },
     extent(s.battery_celsius, CELSIUS_STEP),
@@ -247,12 +239,11 @@ async function load(signal) {
   charts = [
     chart(
       "Power",
-      [s.time, ...sources.map(([, values]) => values), s.input_watts, s.output_watts, net],
+      [s.time, ...sources.map(([, values]) => values), s.input_watts, s.output_watts],
       [
         ...sources.map(([label, , stroke]) => ({ label, stroke, scale: "W" })),
         { label: "input W", stroke: INPUT, width: TOTAL_WIDTH, scale: "W" },
         { label: "output W", stroke: OUTPUT, scale: "W" },
-        { label: "battery W, estimated (in − out)", stroke: BATTERY, dash: ESTIMATE_DASH, scale: "W" },
       ],
       [yAxis("W")],
     ),

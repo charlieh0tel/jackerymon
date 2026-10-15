@@ -82,22 +82,6 @@ test("two charts and the state strip are drawn from /series for the default rang
   await expect(page.locator('#ranges button[aria-pressed="true"]')).toHaveText("6 h");
 });
 
-test("the power chart estimates battery power as input minus output", async ({ page }) => {
-  const fake = new Fake();
-  const { input_watts: input, output_watts: output } = fake.series;
-  [input[0], output[0]] = [300, 120];
-  [input[1], output[1]] = [null, 50];
-  await open(page, fake);
-  await expect(page.locator("#charts")).toContainText("battery W, estimated");
-  // `charts` is the page's own list of uPlot instances.
-  const net = await page.evaluate(() => {
-    const power = charts[0];
-    const at = power.series.findIndex((series) => series.label?.startsWith("battery W"));
-    return power.data[at].slice(0, 2);
-  });
-  expect(net).toEqual([180, null]);
-});
-
 // The Power chart's line labels, in order.
 const powerLabels = (page) => page.evaluate(() => charts[0].series.slice(1).map((series) => series.label));
 
@@ -109,7 +93,6 @@ test("input sources that delivered nothing in the window get no line", async ({ 
     "AC input W",
     "input W",
     "output W",
-    "battery W, estimated (in − out)",
   ]);
 });
 
