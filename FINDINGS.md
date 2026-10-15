@@ -394,6 +394,49 @@ output power above zero instead.
 In the same samples, `acip + cip + acpsp/10` equaled `ip` every time,
 but `cip` and `acpsp` were always 0, so only the AC path is confirmed.
 
+## Power the unit does not report (2026-10-14)
+
+Mains passes through to the AC outlets without counting as input: with
+the unit plugged in and full, AC output on, `ip` and `acip` read 0
+while the outlets ran on mains.  The unit sends no `iac`, so mains
+presence shows only in the AC output while it is on: on mains it
+wandered 121-123 V and read 59 Hz more often than 60; when the user
+unplugged it (21:03:36 UTC) it went to 119.8-120.3 V at exactly 60 Hz,
+the inverter.  Every AC-on stretch logged before then had the mains
+signature.
+
+`op` misses small loads.  Across about 28,000 samples it took only the
+values 0, 2, 10, 15 and 17.  The light on high read exactly 2 W every
+time.  A laptop on an AC outlet (its battery full, drawing its running
+load only) read 0 W apart from 25 readings of 10-17 W.
+
+On battery with AC and DC output on, no loads and the light off, `op`
+read 0 W while the charge fell 100 to 99 % at 21:22:31 UTC and 99 to
+98 % at 21:46:02, 23.5 minutes for one point.  At 20-22 Wh a point
+(2042 or 2160 Wh; the model's capacity is unconfirmed) that is about
+50-55 W of draw the unit does not report.  This is one clean interval
+of a whole-point estimate.
+
+With AC output off and DC output on, still no loads, the charge fell 98
+to 97 % at 02:59:59 UTC on 2026-10-15, 5 h 14 min after reaching 98 %,
+and 97 to 96 % at 09:04:34, 6 h 5 min later: about 4 W.  So the AC
+inverter idles at about 46 W, and the rest of the unit at about 4 W.
+DC output went off at 08:43:05, exactly 12 h after it was turned on,
+as the 12 h energy saving setting (`pm`) did once before (02:30:46 to
+14:30:50 on 2026-10-14); the last 21 minutes ran with both outputs off.
+
+`ot` says nothing about this draw: through 2026-10-14 it read 99.8 or
+99.9 h in all but one sample, whatever outputs were on.  It sits at
+its ceiling; 46 W empties a full pack in about 45 h.
+
+So input minus output, the web view's battery-power estimate, read 0 W
+while the battery lost about 50 W.  It was dropped in 0.1.10.
+
+On 2026-10-13 the charge fell to 99 % after about 15.5 hours on mains,
+AC and DC output on with no reported load, and the unit then drew
+304 Wh at up to 786 W to return to 100 %.  What drew it down while on
+mains is unknown; the outlets were on mains, so not the inverter.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
