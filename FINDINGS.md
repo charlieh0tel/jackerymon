@@ -447,6 +447,20 @@ AC and DC output on with no reported load, and the unit then drew
 it down while on mains is unknown; the outlets were on mains, so not
 the inverter.
 
+## Explorer 3000 and HomePower 3000 (2026-10-16)
+
+The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer
+2000's status request with the same keys plus `dt` (10), `en` (0) and
+`uo` (-25200, the UTC offset in seconds for PDT).  Its `ot` read 96.1
+h, below the ceiling the 2000 sits at.
+
+The HomePower 3000 (model 19, "HP3000"; advertised battery 90,
+bind counter 1) connects and takes the request write, but sends no
+notification: three attempts with 10 s timeouts, three with 30 s.  The
+app gives it the same GATT UUIDs, codec (RC4, no IV) and frame version
+as models 12 and 14.  Whether its key is wrong or it needs another
+request first is unknown.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud

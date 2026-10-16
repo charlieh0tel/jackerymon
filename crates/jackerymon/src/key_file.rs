@@ -26,7 +26,7 @@ pub enum KeyFileError {
     Base64(#[from] base64::DecodeError),
     #[error("invalid key file identity: {0}")]
     Identity(#[from] IdentityError),
-    #[error("model {0} is not supported; only model {supported} is", supported = ModelCode::EXPLORER_2000)]
+    #[error("model {0} is not supported; supported: {supported}", supported = ModelCode::supported_list())]
     UnsupportedModel(ModelCode),
 }
 
@@ -68,7 +68,7 @@ impl KeyFile {
     /// than the Explorer 2000.
     pub fn parse(text: &str) -> Result<Self, KeyFileError> {
         let stored: Stored = serde_json::from_str(text)?;
-        if stored.model != ModelCode::EXPLORER_2000 {
+        if !ModelCode::SUPPORTED.contains(&stored.model) {
             return Err(KeyFileError::UnsupportedModel(stored.model));
         }
         Ok(Self {
@@ -106,6 +106,10 @@ mod tests {
 
     #[test]
     fn parses_poc_layout() {
+        assert!(
+            KeyFile::parse(&text(14, "dGVzdC1rZXk=")).is_ok(),
+            "Explorer 3000"
+        );
         let file = KeyFile::parse(&text(12, "dGVzdC1rZXk=")).expect("valid file");
         assert_eq!(file.address, "90:E5:B1:21:ED:BA");
         assert_eq!(file.serial.as_str(), "123456789");

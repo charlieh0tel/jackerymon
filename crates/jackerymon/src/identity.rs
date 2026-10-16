@@ -66,8 +66,24 @@ impl fmt::Display for Guid {
 pub struct ModelCode(pub u16);
 
 impl ModelCode {
-    /// The only model whose codec has been validated (no IV).
+    /// Explorer 2000 v2 ("E2000Pro2" in the app); the codec was validated
+    /// on it (RC4, no IV).
     pub const EXPLORER_2000: Self = Self(12);
+    /// Explorer 3000 ("E3000"); same codec, answers the same requests.
+    pub const EXPLORER_3000: Self = Self(14);
+    /// Models that have answered.  The HomePower 3000 (19, "HP3000")
+    /// takes the same codec in the app but has not answered.
+    pub const SUPPORTED: [Self; 2] = [Self::EXPLORER_2000, Self::EXPLORER_3000];
+
+    /// [`Self::SUPPORTED`], for messages.
+    #[must_use]
+    pub fn supported_list() -> String {
+        Self::SUPPORTED
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 impl fmt::Display for ModelCode {

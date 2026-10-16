@@ -194,12 +194,15 @@ model table `ib/b.java`):
 | Type | Model codes | Codec |
 |---|---|---|
 | Portable (Explorer) | 1-40 | RC4 (`hb/g`, no IV) unless the model spec asks for a fixed IV (`hb/f`) or random IV (`hb/e`) |
-| Home (HomePower) | 3001-3004 | AES-CBC, PKCS#7, random IV prepended (`hb/e`) |
+| Home (SolarVault) | 3001-3004 | AES-CBC, PKCS#7, random IV prepended (`hb/e`) |
 | Box | 2001-2002 | `hb/b` |
 | Accessory | 4001-4008 | `hb/a` |
 
-Only code 12 (RC4, no IV) is implemented and tested. Which product name
-each code belongs to is not mapped.
+Codes 12 and 14 (RC4, no IV) are implemented and tested. The app's
+model specs (`rb/*.java`) name some codes: 12 "E2000Pro2" (Explorer
+2000 v2), 14 "E3000" (Explorer 3000), 19 "HP3000" (HomePower 3000).
+Code 19 takes the same codec and frame version in the app but has not
+answered (`FINDINGS.md`).
 
 ### Frame format
 
