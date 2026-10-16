@@ -16,55 +16,110 @@ use super::state::Snapshot;
 
 pub(super) const STALE_AFTER: Duration = Duration::from_secs(60);
 
-/// Builds the exposition text, one metric family at a time.
+/// One metric family: its header and a line per sample, from every unit.
+struct Family {
+    name: &'static str,
+    kind: &'static str,
+    help: &'static str,
+    samples: Vec<String>,
+}
+
+/// Builds the exposition text.  Families are written in the order first
+/// seen, each header once, however many units have a sample in it.
 struct Exposition {
-    text: String,
+    families: Vec<Family>,
+    /// The unit whose samples are being added.
     serial: String,
 }
 
 impl Exposition {
-    fn family(&mut self, name: &str, kind: &str, help: &str) {
-        writeln!(self.text, "# HELP {name} {help}").expect("writing to a String");
-        writeln!(self.text, "# TYPE {name} {kind}").expect("writing to a String");
+    fn family(
+        &mut self,
+        name: &'static str,
+        kind: &'static str,
+        help: &'static str,
+    ) -> &mut Family {
+        let at = match self.families.iter().position(|family| family.name == name) {
+            Some(at) => at,
+            None => {
+                self.families.push(Family {
+                    name,
+                    kind,
+                    help,
+                    samples: Vec::new(),
+                });
+                self.families.len() - 1
+            }
+        };
+        &mut self.families[at]
     }
 
-    fn sample(&mut self, name: &str, labels: &[(&str, &str)], value: f64) {
+    fn sample(
+        &mut self,
+        (name, kind, help): (&'static str, &'static str, &'static str),
+        labels: &[(&str, &str)],
+        value: f64,
+    ) {
         let extra: String = labels
             .iter()
             .map(|(key, label)| format!(",{key}=\"{label}\""))
             .collect();
-        writeln!(
-            self.text,
-            "{name}{{serial=\"{}\"{extra}}} {value}",
-            self.serial
-        )
-        .expect("writing to a String");
+        let line = format!("{name}{{serial=\"{}\"{extra}}} {value}", self.serial);
+        self.family(name, kind, help).samples.push(line);
     }
 
     /// A gauge with one value, omitted when there is none.
-    fn gauge(&mut self, name: &str, help: &str, value: Option<f64>) {
+    fn gauge(&mut self, name: &'static str, help: &'static str, value: Option<f64>) {
         if let Some(value) = value {
-            self.family(name, "gauge", help);
-            self.sample(name, &[], value);
+            self.sample((name, GAUGE, help), &[], value);
         }
     }
 
-    fn counter(&mut self, name: &str, help: &str, value: u64) {
-        self.family(name, "counter", help);
-        self.sample(name, &[], to_f64(value));
+    fn counter(&mut self, name: &'static str, help: &'static str, value: u64) {
+        self.sample((name, COUNTER, help), &[], to_f64(value));
+    }
+
+    fn text(&self) -> String {
+        let mut text = String::new();
+        for family in &self.families {
+            let Family {
+                name,
+                kind,
+                help,
+                samples,
+            } = family;
+            writeln!(text, "# HELP {name} {help}\n# TYPE {name} {kind}")
+                .expect("writing to a String");
+            for sample in samples {
+                writeln!(text, "{sample}").expect("writing to a String");
+            }
+        }
+        text
     }
 }
+
+const GAUGE: &str = "gauge";
+const COUNTER: &str = "counter";
 
 /// Counts stay far below 2^53, where `f64` would lose precision.
 fn to_f64(value: u64) -> f64 {
     value as f64
 }
 
-pub(super) fn render(snapshot: &Snapshot, now: SystemTime) -> String {
+/// The exposition of every unit in `snapshots`.
+pub(super) fn render(snapshots: &[Snapshot], now: SystemTime) -> String {
     let mut out = Exposition {
-        text: String::new(),
-        serial: snapshot.serial.clone(),
+        families: Vec::new(),
+        serial: String::new(),
     };
+    for snapshot in snapshots {
+        out.serial.clone_from(&snapshot.serial);
+        unit(&mut out, snapshot, now);
+    }
+    out.text()
+}
+
+fn unit(out: &mut Exposition, snapshot: &Snapshot, now: SystemTime) {
     let connected = matches!(snapshot.link, Link::Connected);
     out.gauge(
         "jackery_connected",
@@ -87,7 +142,7 @@ pub(super) fn render(snapshot: &Snapshot, now: SystemTime) -> String {
         snapshot.transport_failures,
     );
     let Some(latest) = &snapshot.latest else {
-        return out.text;
+        return;
     };
     out.gauge(
         "jackery_last_sample_timestamp_seconds",
@@ -102,9 +157,8 @@ pub(super) fn render(snapshot: &Snapshot, now: SystemTime) -> String {
         .duration_since(latest.received)
         .is_ok_and(|age| age <= STALE_AFTER);
     if let (true, Some(status)) = (fresh, &latest.status) {
-        readings(&mut out, status);
+        readings(out, status);
     }
-    out.text
 }
 
 fn readings(out: &mut Exposition, status: &Status) {
@@ -178,15 +232,12 @@ fn readings(out: &mut Exposition, status: &Status) {
     .into_iter()
     .filter_map(|(output, state)| state.map(|on| (output, on)))
     .collect();
-    if !outputs.is_empty() {
-        out.family("jackery_output_on", "gauge", "1 while an output is on.");
-        for (output, on) in outputs {
-            out.sample(
-                "jackery_output_on",
-                &[("output", output)],
-                f64::from(u8::from(on)),
-            );
-        }
+    for (output, on) in outputs {
+        out.sample(
+            ("jackery_output_on", GAUGE, "1 while an output is on."),
+            &[("output", output)],
+            f64::from(u8::from(on)),
+        );
     }
 }
 
@@ -219,7 +270,7 @@ mod tests {
     #[test]
     fn fresh_readings_are_exported() {
         let now = SystemTime::now();
-        let text = render(&snapshot(now), now);
+        let text = render(&[snapshot(now)], now);
         for expected in [
             "# TYPE jackery_connected gauge\njackery_connected{serial=\"123456789\"} 1\n",
             "jackery_samples_total{serial=\"123456789\"} 3\n",
@@ -237,7 +288,7 @@ mod tests {
     fn stale_readings_are_left_out() {
         let received = SystemTime::now();
         let text = render(
-            &snapshot(received),
+            &[snapshot(received)],
             received + STALE_AFTER + Duration::from_secs(1),
         );
         assert!(text.contains("jackery_last_sample_timestamp_seconds"));
@@ -245,8 +296,25 @@ mod tests {
     }
 
     #[test]
+    fn each_family_is_declared_once_for_all_units() {
+        let now = SystemTime::now();
+        let mut other = snapshot(now);
+        other.serial = "987654321".to_owned();
+        let text = render(&[snapshot(now), other], now);
+        assert_eq!(
+            text.matches("# TYPE jackery_battery_percent gauge").count(),
+            1
+        );
+        assert!(text.contains(
+            "jackery_battery_percent{serial=\"123456789\"} 100\n\
+             jackery_battery_percent{serial=\"987654321\"} 100\n"
+        ));
+        assert_eq!(text.matches("# TYPE jackery_output_on gauge").count(), 1);
+    }
+
+    #[test]
     fn nothing_but_counters_before_the_first_sample() {
-        let text = render(&Snapshot::new("123456789".to_owned()), SystemTime::now());
+        let text = render(&[Snapshot::new("123456789".to_owned())], SystemTime::now());
         assert!(text.contains("jackery_connected{serial=\"123456789\"} 0\n"));
         assert!(!text.contains("jackery_last_sample"));
     }

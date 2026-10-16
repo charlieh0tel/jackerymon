@@ -95,7 +95,7 @@ async fn metrics(State(shared): State<Arc<Shared>>) -> impl IntoResponse {
     let snapshot = shared.snapshot.lock().expect("snapshot lock").clone();
     (
         [(CONTENT_TYPE, METRICS_CONTENT_TYPE)],
-        metrics::render(&snapshot, SystemTime::now()),
+        metrics::render(&[snapshot], SystemTime::now()),
     )
 }
 
