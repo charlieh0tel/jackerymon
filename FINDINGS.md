@@ -458,8 +458,10 @@ The HomePower 3000 (model 19, "HP3000"; advertised battery 90,
 bind counter 1) connects and takes the request write, but sends no
 notification: three attempts with 10 s timeouts, three with 30 s.  The
 app gives it the same GATT UUIDs, codec (RC4, no IV) and frame version
-as models 12 and 14.  Whether its key is wrong or it needs another
-request first is unknown.
+as models 12 and 14.  The unit may be bound to another account: the
+cloud gave this account a key for its serial, and a key the unit does
+not use would explain the silence.  Unconfirmed until the unit is
+bound to the account that fetched the key.
 
 ## Open questions
 
