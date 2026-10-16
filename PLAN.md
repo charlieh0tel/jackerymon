@@ -32,7 +32,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   one page with links between units.  Each unit has its own BlueZ
   session (BlueZ keeps one scan filter per D-Bus client, so pollers
   sharing one overwrite each other's), lock, socket, and log
-  directory.  A unit whose polling fails, or that another process
+  directory.  Units take turns finding and connecting: BlueZ makes one
+  LE connection at a time per adapter and fails another with
+  "Operation already in progress", which two units retrying in step
+  never got past.  A unit whose polling fails, or that another process
   holds, tries again after 5 s without touching the others.  A key
   that does not load is reported and left out.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty

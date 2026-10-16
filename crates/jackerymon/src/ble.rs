@@ -28,6 +28,7 @@ use log::debug;
 use log::info;
 use log::warn;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -52,6 +53,11 @@ const SERVICE: Uuid = bluetooth_uuid(0xbdee);
 /// Bound on BlueZ calls outside a connect attempt, such as finding the
 /// adapter; bluer's own D-Bus timeout is two minutes.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Held while a unit is found and connected.  BlueZ makes one LE
+/// connection at a time per adapter and fails a second attempt with
+/// "Operation already in progress", so units polled by one process take
+/// turns.
+static CONNECTING: Mutex<()> = Mutex::const_new(());
 /// Write-without-response command characteristic.
 const COMMAND: Uuid = bluetooth_uuid(0xee01);
 /// Notify characteristic carrying responses.
@@ -333,6 +339,7 @@ impl Connector for Unit {
     type Link = Connection;
 
     async fn connect(&mut self, limit: Duration) -> Result<Connection, BleError> {
+        let _turn = CONNECTING.lock().await;
         // A process that exited without disconnecting leaves BlueZ
         // connected, and a connected unit does not advertise.
         let device = self.adapter.device(self.address)?;
