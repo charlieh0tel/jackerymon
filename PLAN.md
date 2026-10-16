@@ -29,7 +29,8 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Several units: one daemon, a poller per unit** (2026-10-16; until
   then one daemon per unit).  The daemon serves every key in
   `/etc/jackerymon`, or the one `--unit` names: one port, one scrape,
-  one page with links between units.  Each unit has its own BlueZ
+  one page with a chooser of units, by serial, each with its model
+  and link state.  Each unit has its own BlueZ
   session (BlueZ keeps one scan filter per D-Bus client, so pollers
   sharing one overwrite each other's), lock, socket, and log
   directory.  Units take turns finding and connecting: BlueZ makes one

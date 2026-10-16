@@ -673,19 +673,20 @@ mod tests {
             .expect("json");
         assert_eq!(status["serial"], "222");
         assert_eq!(status["model_name"], "Explorer 2000 v2");
-        // A connected unit comes first.
+        // By serial, connected or not.
         connected.snapshot.lock().expect("snapshot lock").apply(
             &Update::Connected { connection: 1 },
             std::time::SystemTime::now(),
         );
-        assert_eq!(get("/").await.expect("page").url().path(), "/units/222/");
+        assert_eq!(get("/").await.expect("page").url().path(), "/units/111/");
         let listed: serde_json::Value = get("/units")
             .await
             .expect("units")
             .json()
             .await
             .expect("json");
-        assert_eq!(listed[0]["serial"], "222");
+        assert_eq!(listed[0]["serial"], "111");
+        assert_eq!(listed[1]["link"]["state"], "connected");
         let metrics = get("/metrics")
             .await
             .expect("metrics")

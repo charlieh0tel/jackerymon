@@ -22,6 +22,8 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   await expect(strip).toContainText("charging");
   const colophon = page.locator("#colophon");
   await expect(colophon).toContainText("Jackery Explorer 2000 v2 855125071405677");
+  await expect(page).toHaveTitle("Jackery Explorer 2000 v2 855125071405677");
+  await expect(page.locator("#unit")).toContainText("modelExplorer 2000 v2");
   await expect(colophon).toContainText("© Christopher Hoover");
   await expect(colophon.locator("a", { hasText: "issues" })).toHaveAttribute(
     "href",
@@ -29,7 +31,7 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   );
 });
 
-test("one unit gets no unit links", async ({ page }) => {
+test("one unit gets no unit chooser", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);
   await expect(page.locator("#status .pill")).toHaveText("LIVE");
@@ -37,18 +39,23 @@ test("one unit gets no unit links", async ({ page }) => {
   await expect(page.locator("#units")).toBeHidden();
 });
 
-test("several units get links that keep the chart window", async ({ page }) => {
+test("several units get a chooser that says which are connected", async ({ page }) => {
   const fake = new Fake();
   fake.units.push({ serial: "987654321", model: 99, model_name: null, link: { state: "searching" } });
   await open(page, fake, "/units/855125071405677/?last=600");
-  const links = page.locator("#units a");
-  await expect(links).toHaveText(["Explorer 2000 v2 855125071405677", "model 99 987654321"]);
-  await expect(links.first()).toHaveAttribute("aria-current", "page");
-  await expect(links.nth(1)).toHaveAttribute("href", "../987654321/?last=600");
-  // Reads go to the unit's own address.
-  expect(fake.seen.status).toBeGreaterThan(0);
+  const choice = page.locator("#unit-choice");
+  await expect(choice.locator("option")).toHaveText([
+    "Explorer 2000 v2 855125071405677: connected",
+    "model 99 987654321: searching",
+  ]);
+  await expect(choice).toHaveValue("855125071405677");
+  // States are read again, in place, every 5 s (UNITS_EVERY).
+  fake.units[1].link = { state: "connected" };
+  await expect(choice.locator("option").nth(1)).toHaveText("model 99 987654321: connected", { timeout: 10000 });
+  // Choosing a unit opens its page with the same chart window.
   await page.locator("#ranges button", { hasText: "24 h" }).click();
-  await expect(links.nth(1)).toHaveAttribute("href", "../987654321/?last=86400");
+  await choice.selectOption("987654321");
+  await expect(page).toHaveURL(/\/units\/987654321\/\?last=86400$/);
 });
 
 test("polling that failed says it restarts, and why", async ({ page }) => {

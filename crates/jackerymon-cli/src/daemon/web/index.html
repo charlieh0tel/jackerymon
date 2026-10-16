@@ -10,7 +10,9 @@
 
 <link rel="stylesheet" href="style.css">
 
-<nav id="units" hidden></nav>
+<div class="panel controls" id="units" hidden>
+  <label>unit <select id="unit-choice"></select></label>
+</div>
 
 <div class="panel" id="status"><span class="muted">connecting...</span></div>
 
@@ -357,6 +359,8 @@ function unitTable(s) {
     ? `on, ${fmt(v.ac_output_volts, 1)} V ${fmt(v.ac_output_hertz)} Hz`
     : v.ac_output;
   const rows = [
+    ["model", productName(s)],
+    ["serial", s.serial],
     ["AC output", acOut],
     ["DC output", v.dc_output],
     ["USB output", v.usb_output],

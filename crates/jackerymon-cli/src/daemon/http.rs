@@ -131,8 +131,7 @@ pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     router
 }
 
-/// The units and their links, connected ones first, each group by
-/// serial.
+/// The units and their links, by serial.
 fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
     let mut listed: Vec<(&Unit, Link)> = units
         .iter()
@@ -141,7 +140,7 @@ fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
             (unit.as_ref(), link)
         })
         .collect();
-    listed.sort_by_key(|(unit, link)| (!matches!(link, Link::Connected), unit.serial.clone()));
+    listed.sort_by(|(one, _), (other, _)| one.serial.cmp(&other.serial));
     listed
 }
 
@@ -164,8 +163,8 @@ async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
     }
 }
 
-/// The units served and their links, as [`ordered`] puts them, for the
-/// page's unit links.
+/// The units served, their models and links, as [`ordered`] puts them,
+/// for the page's unit chooser.
 async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
     let listed: Vec<Value> = ordered(&units)
         .into_iter()

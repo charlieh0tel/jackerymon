@@ -1,5 +1,5 @@
 // What the page shares with any later one: fetching that never hangs,
-// the status strip, links to the daemon's other units, the range
+// the status strip, a chooser of the daemon's units, the range
 // control, and the lifecycle that decides when content reads and what it
 // does when the daemon goes away.  The page is served at a unit's own
 // address, `/units/<serial>/`, and reads that unit's data relative to
@@ -122,6 +122,7 @@ function render(s) {
       ? `<span class="pill stale">temperature ${esc(v.temperature_alarm)}</span>`
       : "") +
     (s.link?.error ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
+  document.title = `Jackery ${productName(s)} ${s.serial}`;
   const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
   $("colophon").innerHTML = [
     `Jackery ${esc(productName(s))} ${esc(s.serial)}`,
@@ -139,9 +140,13 @@ function render(s) {
 // The product's name, or its model code when the daemon has no name.
 const productName = (u) => u.model_name ?? `model ${u.model}`;
 
-// The units the daemon serves, from `/units`, two levels up from a
-// unit's page; empty until read.
+// The units the daemon serves, by serial, from `/units`, two levels up
+// from a unit's page; empty until read.  Read again this often, so each
+// one's link state stays current.
 let units = [];
+const UNITS_EVERY = 5000;
+// A link state as the chooser words it.
+const LINK_WORDS = { connected: "connected", searching: "searching", lost: "reconnecting", failed: "restarting" };
 
 async function readUnits() {
   const listed = await getJson("../../units");
@@ -149,16 +154,21 @@ async function readUnits() {
   drawUnits();
 }
 
-// A link to each unit, keeping the chart window; none for one unit.
+// A chooser of units with their link states, hidden for one unit.
+// Choosing one opens its page with the same chart window.
 function drawUnits() {
-  const el = $("units");
-  el.hidden = units.length < 2;
-  const here = latest?.serial;
-  el.innerHTML = units
-    .map((u) =>
-      `<a href="../${esc(encodeURIComponent(u.serial))}/${esc(location.search)}"` +
-      `${u.serial === here ? ' aria-current="page"' : ""}>${esc(productName(u))} ${esc(u.serial)}</a>`)
-    .join(" ");
+  $("units").hidden = units.length < 2;
+  const select = $("unit-choice");
+  const label = (u) => `${productName(u)} ${u.serial}: ${LINK_WORDS[u.link?.state] ?? MISSING}`;
+  const same =
+    select.options.length === units.length && units.every((u, i) => select.options[i].value === u.serial);
+  // Relabeled in place when the units are the same, so an open list stays open.
+  if (same) units.forEach((u, i) => (select.options[i].textContent = label(u)));
+  else select.innerHTML = units.map((u) => `<option value="${esc(u.serial)}">${esc(label(u))}</option>`).join("");
+  if (latest?.serial) select.value = latest.serial;
+  select.onchange = () => {
+    location.href = `../${encodeURIComponent(select.value)}/${location.search}`;
+  };
 }
 
 // ------------------------------------------------------------ lifecycle
@@ -204,6 +214,7 @@ function renew() {
 function content(spec) {
   page = spec;
   tick().then(readUnits);
+  setInterval(readUnits, UNITS_EVERY);
   setInterval(tick, STRIP_EVERY);
   if (page.every) {
     setInterval(() => {
@@ -249,7 +260,6 @@ function rangeControl(el, current, changed) {
     const q = new URLSearchParams(location.search);
     q.set("last", String(last));
     history.replaceState(null, "", `${location.pathname}?${q}`);
-    drawUnits();
     rangeControl(el, last, changed);
     changed(last);
   };

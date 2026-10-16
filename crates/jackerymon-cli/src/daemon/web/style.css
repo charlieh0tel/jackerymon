@@ -34,15 +34,9 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim);
 .stale { background: #422006; color: var(--warn); }
 .down { background: #450a0a; color: var(--bad); }
 
-/* Links to the daemon's other units, the current one lit. */
-#units { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The unit chooser, shown when the daemon serves several. */
+#units { margin-bottom: 0; }
 #units[hidden] { display: none; }
-#units a {
-  background: #262b33; color: var(--text); border: 1px solid var(--line);
-  border-radius: 6px; padding: 5px 10px; text-decoration: none;
-}
-#units a:hover { border-color: #3d4452; }
-#units a[aria-current="page"] { background: var(--accent); color: #07121a; border-color: var(--accent); }
 
 .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
 button, select {
