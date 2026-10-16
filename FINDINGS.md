@@ -423,6 +423,16 @@ inverter idles at about 48 W, and the rest of the unit at about 3.5 W.
 DC output went off at 08:43:05, exactly 12 h after it was turned on,
 as the 12 h energy saving setting (`pm`) did once before (02:30:46 to
 14:30:50 on 2026-10-14); the last 21 minutes ran with both outputs off.
+With both off, 96 to 95 % took 6 h 30 min (to 15:34:33): about 3.1 W
+of standby, so DC output on adds little.
+
+Charging from the wall with both outputs off (2026-10-15) confirms the
+scale: `ip` summed over 96-97, 97-98 and 98-99 % gave 20.9, 22.4 and
+22.7 Wh at about 1030 W, 20.4 Wh a point plus about 6 % charger loss.
+The last point is different: 99 to 100 % took 19 minutes and 203 Wh
+as `ip` tapered from 786 to 263 W.  The charge reads 99 % through the
+taper, so 100 % holds more than a linear scale implies; the discharge
+figures above come from 99 % and below.
 
 `ot` says nothing about this draw: through 2026-10-14 it read 99.8 or
 99.9 h in all but one sample, whatever outputs were on.  It sits at
@@ -433,8 +443,9 @@ while the battery lost about 52 W.  It was dropped in 0.1.10.
 
 On 2026-10-13 the charge fell to 99 % after about 15.5 hours on mains,
 AC and DC output on with no reported load, and the unit then drew
-304 Wh at up to 786 W to return to 100 %.  What drew it down while on
-mains is unknown; the outlets were on mains, so not the inverter.
+304 Wh at up to 786 W to return to 100 %, the same taper.  What drew
+it down while on mains is unknown; the outlets were on mains, so not
+the inverter.
 
 ## Open questions
 
