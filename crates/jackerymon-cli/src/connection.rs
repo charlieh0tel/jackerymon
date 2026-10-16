@@ -60,11 +60,8 @@ pub(crate) fn key_path(directory: &Path, serial: &str) -> PathBuf {
     directory.join(serial).with_extension(KEY_EXTENSION)
 }
 
-/// The key file in `directory` for `unit`, or the only one there.
-fn find_key(directory: &Path, unit: Option<&str>) -> Result<PathBuf> {
-    if let Some(unit) = unit {
-        return Ok(key_path(directory, unit));
-    }
+/// Every key file in `directory`, sorted.
+fn keys_in(directory: &Path) -> Result<Vec<PathBuf>> {
     let entries = fs::read_dir(directory)
         .with_context(|| format!("no keys in {}; run `jackerymon key`", directory.display()))?;
     let mut keys = Vec::new();
@@ -80,6 +77,38 @@ fn find_key(directory: &Path, unit: Option<&str>) -> Result<PathBuf> {
         }
     }
     keys.sort();
+    Ok(keys)
+}
+
+/// Every key in `directory`; one that does not load, or repeats a unit,
+/// is reported and left out.
+fn load_all(directory: &Path) -> Result<Vec<KeyFile>> {
+    let mut loaded: Vec<KeyFile> = Vec::new();
+    for path in keys_in(directory)? {
+        match KeyFile::load(&path) {
+            Ok(key_file) if loaded.iter().any(|other| other.serial == key_file.serial) => {
+                log::error!(
+                    "{}: unit {} again; left out",
+                    path.display(),
+                    key_file.serial
+                );
+            }
+            Ok(key_file) => loaded.push(key_file),
+            Err(error) => log::error!("{}: {error:#}; left out", path.display()),
+        }
+    }
+    if loaded.is_empty() {
+        bail!("no usable keys in {}", directory.display());
+    }
+    Ok(loaded)
+}
+
+/// The key file in `directory` for `unit`, or the only one there.
+fn find_key(directory: &Path, unit: Option<&str>) -> Result<PathBuf> {
+    if let Some(unit) = unit {
+        return Ok(key_path(directory, unit));
+    }
+    let keys = keys_in(directory)?;
     match keys.as_slice() {
         [] => bail!("no keys in {}; run `jackerymon key`", directory.display()),
         [only] => Ok(only.clone()),
@@ -139,6 +168,19 @@ impl ConnectionArgs {
         Ok((key_file, lock))
     }
 
+    /// The keys of the units a daemon serves: the one named by `--unit`
+    /// or `--key-file`, or else every key in `home`.  A key that does not
+    /// load, or repeats a unit, is reported and left out.
+    pub(crate) fn key_files(&self, home: KeyHome) -> Result<Vec<KeyFile>> {
+        if self.unit.is_some() || self.key_file.is_some() {
+            return Ok(vec![self.key_file(home)?]);
+        }
+        if self.address.is_some() {
+            bail!("--address is for one unit; choose it with --unit");
+        }
+        load_all(&home.directory()?)
+    }
+
     /// The key for the chosen unit, looked up in `home` unless
     /// `--key-file` names one.
     fn key_file(&self, home: KeyHome) -> Result<KeyFile> {
@@ -191,6 +233,7 @@ mod tests {
 
     use super::find_key;
     use super::key_path;
+    use super::load_all;
     use super::seconds;
 
     #[test]
@@ -213,6 +256,31 @@ mod tests {
         );
         fs::remove_dir_all(&directory).expect("cleanup");
         assert!(several.contains("111, 222"), "{several}");
+    }
+
+    #[test]
+    fn loads_every_usable_key() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-all-keys-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("temp dir");
+        assert!(load_all(&directory).is_err(), "empty");
+        let key = |serial: &str| {
+            serde_json::json!({
+                "address": "90:E5:B1:21:ED:BA",
+                "serial": serial,
+                "model": 12,
+                "bluetoothKey": "dGVzdC1rZXk=",
+            })
+            .to_string()
+        };
+        fs::write(key_path(&directory, "123456789"), key("123456789")).expect("write");
+        fs::write(key_path(&directory, "987654321"), key("987654321")).expect("write");
+        fs::write(key_path(&directory, "copy"), key("123456789")).expect("write");
+        fs::write(key_path(&directory, "broken"), "{").expect("write");
+        let loaded = load_all(&directory).expect("loaded");
+        fs::remove_dir_all(&directory).expect("cleanup");
+        let serials: Vec<_> = loaded.iter().map(|key| key.serial.to_string()).collect();
+        assert_eq!(serials, ["123456789", "987654321"]);
     }
 
     #[test]

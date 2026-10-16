@@ -1,6 +1,9 @@
 // What the page shares with any later one: fetching that never hangs,
-// the status strip, the range control, and the lifecycle that decides
-// when content reads and what it does when the daemon goes away.  After
+// the status strip, links to the daemon's other units, the range
+// control, and the lifecycle that decides when content reads and what it
+// does when the daemon goes away.  The page is served at a unit's own
+// address, `/units/<serial>/`, and reads that unit's data relative to
+// it.  After
 // smartclock-web's common.js, so the fleet's pages behave alike at the
 // edges.  Loaded as a classic script before the page's own, which ends
 // by calling `content` once.
@@ -69,7 +72,7 @@ async function tick() {
   if (ticking) return;
   ticking = true;
   try {
-    const s = await getJson("/status");
+    const s = await getJson("status");
     if (s.error) {
       latest = null;
       $("status").innerHTML =
@@ -95,6 +98,7 @@ function render(s) {
   const age = ageOf(s);
   const state =
     s.link?.state === "lost" ? ["down", "RECONNECTING"]
+    : s.link?.state === "failed" ? ["down", "RESTARTING"]
     : age === null ? ["stale", "SEARCHING"]
     : age > STALE_AFTER ? ["stale", "STALE"]
     : ["live", "LIVE"];
@@ -117,7 +121,7 @@ function render(s) {
     (v.temperature_alarm && v.temperature_alarm !== "none"
       ? `<span class="pill stale">temperature ${esc(v.temperature_alarm)}</span>`
       : "") +
-    (s.link?.state === "lost" ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
+    (s.link?.error ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
   const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
   $("colophon").innerHTML = [
     `Jackery ${esc(s.serial)}`,
@@ -128,6 +132,30 @@ function render(s) {
     link(s.repository, "source"),
     link(`${s.repository}/issues`, "issues"),
   ].join(" · ");
+}
+
+// ---------------------------------------------------------------- units
+
+// The units the daemon serves, from `/units`, two levels up from a
+// unit's page; empty until read.
+let units = [];
+
+async function readUnits() {
+  const listed = await getJson("../../units");
+  units = Array.isArray(listed) ? listed : [];
+  drawUnits();
+}
+
+// A link to each unit, keeping the chart window; none for one unit.
+function drawUnits() {
+  const el = $("units");
+  el.hidden = units.length < 2;
+  const here = latest?.serial;
+  el.innerHTML = units
+    .map(({ serial }) =>
+      `<a href="../${esc(encodeURIComponent(serial))}/${esc(location.search)}"` +
+      `${serial === here ? ' aria-current="page"' : ""}>${esc(serial)}</a>`)
+    .join(" ");
 }
 
 // ------------------------------------------------------------ lifecycle
@@ -172,7 +200,7 @@ function renew() {
 
 function content(spec) {
   page = spec;
-  tick();
+  tick().then(readUnits);
   setInterval(tick, STRIP_EVERY);
   if (page.every) {
     setInterval(() => {
@@ -218,6 +246,7 @@ function rangeControl(el, current, changed) {
     const q = new URLSearchParams(location.search);
     q.set("last", String(last));
     history.replaceState(null, "", `${location.pathname}?${q}`);
+    drawUnits();
     rangeControl(el, last, changed);
     changed(last);
   };

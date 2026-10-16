@@ -20,6 +20,10 @@ pub(super) enum Link {
         error: String,
         consecutive: u32,
     },
+    /// Polling ended with an error and starts again shortly.
+    Failed {
+        error: String,
+    },
 }
 
 /// The latest sample, decoded when its status is valid.
@@ -77,10 +81,15 @@ impl Snapshot {
         }
     }
 
+    /// Polling ended with `error`.
+    pub(super) fn fail(&mut self, error: String) {
+        self.link = Link::Failed { error };
+    }
+
     /// Updates that bring a new `/events` client up to date.
     pub(super) fn replay(&self) -> Vec<Update> {
         let link = match &self.link {
-            Link::Searching => None,
+            Link::Searching | Link::Failed { .. } => None,
             Link::Connected => Some(Update::Connected {
                 connection: self.connections,
             }),

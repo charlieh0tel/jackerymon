@@ -31,7 +31,7 @@ pub enum KeyFileError {
 }
 
 /// Identity of one unit and the key for talking to it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyFile {
     /// BLE address, as `XX:XX:XX:XX:XX:XX`.
     pub address: String,

@@ -53,8 +53,9 @@ and session token are never saved.  From then on, everything uses BLE
 alone.
 
 Every command finds keys there, except `daemon`, which reads
-`/etc/jackerymon/<serial>.json`.  With several keys, choose one with
-`--unit SERIAL`; `--key-file` names a file directly.
+`/etc/jackerymon/<serial>.json` and serves every unit with a key there.
+With several keys, other commands take `--unit SERIAL`; `--key-file`
+names a file directly.
 
 ## Commands
 
@@ -72,18 +73,22 @@ The unit takes one BLE connection, so one jackerymon holds it at a time
 (a lock in `/run/lock`), and while one does the phone app cannot
 connect.  If a daemon is running, `tui` and `set` find it and go
 through it; `--direct` connects to the unit instead, and `--daemon`
-names a daemon by URL or socket.
+names a daemon by socket or URL (`http://host:9888/units/<serial>`).
 
 Commands other than `tui` log BLE recoveries to stderr; `RUST_LOG`
 sets the filter.
 
 ## Daemon
 
-`jackerymon daemon` holds the connection and serves the full API on a
-Unix socket, `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
-`/run/jackerymon/`), and the read-only routes over TCP for Prometheus:
+`jackerymon daemon` holds the connection to each unit and serves each
+unit's full API on its own Unix socket,
+`$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
+`/run/jackerymon/`), and the read-only routes over TCP, each unit's
+under `/units/<serial>`.  TCP's `/` opens the first unit's page, which
+links to the others; its `/metrics` covers every unit, labeled
+`serial`; `/units` lists them.
 
-| Route | Gives | TCP |
+| Route, per unit | Gives | TCP |
 |---|---|---|
 | `GET /status` | link state, counters, latest sample | yes |
 | `GET /metrics` | Prometheus `jackery_*` metrics | yes |
@@ -99,8 +104,9 @@ curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \
     http://localhost/settings
 ```
 
-For Prometheus, and Grafana on top of it, scrape `/metrics`; set
-`JACKERYMON_LISTEN` (below) if Prometheus runs elsewhere:
+For Prometheus, and Grafana on top of it, scrape `/metrics`, one
+target for every unit; set `JACKERYMON_LISTEN` (below) if Prometheus
+runs elsewhere:
 
 ```yaml
 scrape_configs:
@@ -129,13 +135,13 @@ disabled.  To run the daemon:
 ```sh
 sudo apt install ./jackerymon_*.deb
 jackerymon key                       # if you have no key yet
-sudo install -m 0640 -g jackerymon ~/.config/jackerymon/<serial>.json /etc/jackerymon/
+sudo install -m 0640 -g jackerymon ~/.config/jackerymon/*.json /etc/jackerymon/
 sudo usermod -aG jackerymon $USER    # control through the socket; log in again
 sudo systemctl enable --now jackerymon
 ```
 
 Daemon options are in `/etc/default/jackerymon`.  Samples go to
-`/var/lib/jackerymon/`, one file per day; a daily timer gzips finished
+`/var/lib/jackerymon/<serial>/`, one file per day; a daily timer gzips finished
 days, and nothing is deleted.
 
 To build the package: `cargo deb -p jackerymon-cli`; to release, see

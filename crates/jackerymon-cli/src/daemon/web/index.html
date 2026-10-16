@@ -8,7 +8,9 @@
       integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE"
       crossorigin="anonymous">
 
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="style.css">
+
+<nav id="units" hidden></nav>
 
 <div class="panel" id="status"><span class="muted">connecting...</span></div>
 
@@ -32,7 +34,7 @@
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"
         integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c"
         crossorigin="anonymous"></script>
-<script src="/common.js"></script>
+<script src="common.js"></script>
 <script>
 "use strict";
 
@@ -220,7 +222,7 @@ async function load(signal) {
   const since = new Date(until.getTime() - range * 1000);
   const every = Math.max(1, Math.round(range / POINTS));
   const q = new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), every });
-  const s = await ask(`/series?${q}`, signal);
+  const s = await ask(`series?${q}`, signal);
   if (!s.time.length) {
     clearCharts("no samples logged in this window");
     return;

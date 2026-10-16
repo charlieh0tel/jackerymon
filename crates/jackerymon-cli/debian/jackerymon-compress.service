@@ -1,5 +1,5 @@
 # Gzips the daemon's finished daily sample logs: every
-# /var/lib/jackerymon/YYYY-MM-DD.jsonl but today's (UTC).  Nothing is
+# /var/lib/jackerymon/<serial>/YYYY-MM-DD.jsonl but today's (UTC).  Nothing is
 # deleted.  Run daily by jackerymon-compress.timer, which the daemon's
 # unit pulls in.
 [Unit]

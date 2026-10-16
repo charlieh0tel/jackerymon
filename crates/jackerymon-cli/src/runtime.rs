@@ -237,7 +237,7 @@ fn find_in(directories: &[PathBuf], unit: Option<&str>) -> Result<Option<PathBuf
                 .filter_map(|path| path.file_stem()?.to_str())
                 .collect();
             bail!(
-                "daemons for several units ({}); choose one with --unit",
+                "daemons serve several units ({}); choose one with --unit",
                 serials.join(", ")
             )
         }

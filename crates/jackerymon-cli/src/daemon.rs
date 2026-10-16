@@ -1,8 +1,11 @@
-//! `jackerymon daemon`: own the BLE connection; serve status, metrics,
-//! live updates, and settings over HTTP; optionally log every sample.
+//! `jackerymon daemon`: own the BLE connections to one or more units;
+//! serve status, metrics, live updates, and settings over HTTP;
+//! optionally log every sample.
 //!
-//! The full API is on a Unix socket, whose permissions decide who may
-//! use it.  TCP, for Prometheus, is read-only unless `--tcp-control`.
+//! Each unit's full API is on its own Unix socket, whose permissions
+//! decide who may use it.  TCP, for Prometheus and the browser, serves
+//! every unit under `/units/<serial>/`, read-only unless
+//! `--tcp-control`.
 
 mod http;
 pub(crate) mod log;
@@ -25,9 +28,13 @@ use ::log::info;
 use ::log::warn;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use clap::Args;
+use futures::future::join_all;
 use jackerymon::ble;
+use jackerymon::key_file::KeyFile;
 use jackerymon::poll::ControlRequest;
+use jackerymon::poll::PollConfig;
 use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tokio::signal::unix::SignalKind;
@@ -50,14 +57,19 @@ const EVENT_BUFFER: usize = 64;
 /// How often `/events` sends a comment while idle, so a client can tell
 /// a quiet daemon from a dead connection.
 pub(crate) const EVENT_KEEP_ALIVE: Duration = Duration::from_secs(15);
-/// How long open requests may finish after polling ends.
+/// How long open requests may finish after the daemon starts stopping.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// Settings queued from HTTP while one is being applied.
 const COMMAND_BUFFER: usize = 8;
+/// How long a unit waits to poll again after polling failed, as systemd
+/// waited to restart a daemon that served one unit.
+const RESTART_DELAY: Duration = Duration::from_secs(5);
 
 /// Options of `jackerymon daemon`.
 #[derive(Args)]
 pub(crate) struct DaemonArgs {
+    /// Without `--unit` or `--key-file`, every unit with a key in the key
+    /// directory.
     #[command(flatten)]
     connection: ConnectionArgs,
     /// TCP address for the read-only routes: metrics, status, events.
@@ -68,126 +80,107 @@ pub(crate) struct DaemonArgs {
     /// switch outputs.
     #[arg(long, env = "JACKERYMON_TCP_CONTROL")]
     tcp_control: bool,
-    /// Unix socket for the full API; default
+    /// Unix socket for the full API of the one unit served; default
     /// `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock`, or systemd's runtime
     /// directory.
     #[arg(long)]
     socket: Option<PathBuf>,
-    /// Directory for daily `YYYY-MM-DD.jsonl` sample logs; none if unset.
+    /// Directory for daily `<serial>/YYYY-MM-DD.jsonl` sample logs; none
+    /// if unset.
     #[arg(long)]
     log_dir: Option<PathBuf>,
 }
 
-/// What the poller and HTTP handlers share.
-struct Shared {
+/// One unit: what its poller and HTTP handlers share.
+struct Unit {
+    serial: String,
     snapshot: Mutex<Snapshot>,
     updates: broadcast::Sender<Update>,
-    commands: mpsc::Sender<ControlRequest>,
-    /// Set once polling has ended, for any reason; HTTP then winds down.
-    stopping: watch::Sender<bool>,
-    /// `--log-dir`, which `/history` reads; `None` without one.
+    /// The running poll's settings queue.  Replaced each time polling
+    /// starts, since a poll that ends takes its receiver with it.
+    commands: Mutex<mpsc::Sender<ControlRequest>>,
+    /// Turns true when the daemon stops; HTTP then winds down.
+    stopping: watch::Receiver<bool>,
+    /// This unit's directory under `--log-dir`, which `/history` reads;
+    /// `None` without one.
     log_dir: Option<PathBuf>,
 }
 
-impl Shared {
-    /// The shared state and the receiving end of its commands.
-    fn new(
-        serial: String,
-        log_dir: Option<PathBuf>,
-    ) -> (Arc<Self>, mpsc::Receiver<ControlRequest>) {
+impl Unit {
+    fn new(serial: String, log_dir: Option<PathBuf>, stopping: watch::Receiver<bool>) -> Arc<Self> {
         let (updates, _) = broadcast::channel(EVENT_BUFFER);
-        let (commands, requests) = mpsc::channel(COMMAND_BUFFER);
-        let shared = Self {
-            snapshot: Mutex::new(Snapshot::new(serial)),
+        // Closed until polling starts, so a setting fails at once.
+        let (commands, _) = mpsc::channel(COMMAND_BUFFER);
+        Arc::new(Self {
+            snapshot: Mutex::new(Snapshot::new(serial.clone())),
+            serial,
             updates,
-            commands,
-            stopping: watch::Sender::new(false),
+            commands: Mutex::new(commands),
+            stopping,
             log_dir,
-        };
-        (Arc::new(shared), requests)
+        })
     }
 
-    /// Completes once polling has ended.
+    /// A new settings queue, for a poll about to start.
+    fn take_commands(&self) -> mpsc::Receiver<ControlRequest> {
+        let (commands, requests) = mpsc::channel(COMMAND_BUFFER);
+        *self.commands.lock().expect("commands lock") = commands;
+        requests
+    }
+
+    /// Completes once the daemon is stopping.
     fn stopped(&self) -> impl Future<Output = ()> + use<> {
-        let mut stopping = self.stopping.subscribe();
-        async move {
-            // An error means the sender is gone, which also means stopped.
-            stopping.wait_for(|stopping| *stopping).await.ok();
-        }
+        stopped(self.stopping.clone())
     }
 }
 
+/// Completes once `stopping` turns true, or its sender is gone, which
+/// also means stopped.
+async fn stopped(mut stopping: watch::Receiver<bool>) {
+    stopping.wait_for(|stopping| *stopping).await.ok();
+}
+
 pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
-    let (key_file, _lock) = arguments.connection.claim(KeyHome::System)?;
-    // A daemon keeps trying while the unit's radio is off.
+    let key_files = arguments.connection.key_files(KeyHome::System)?;
+    if arguments.socket.is_some() && key_files.len() > 1 {
+        bail!("--socket is for one unit; choose it with --unit");
+    }
+    // A daemon keeps trying while a unit's radio is off.
     let config = arguments.connection.poll_config(None);
-    let adapter = ble::default_adapter().await?;
-    let socket_path = match arguments.socket {
-        Some(path) => path,
-        None => runtime::daemon_path(key_file.serial.as_str())?,
-    };
-    let (socket, _claimed) = runtime::claim(&socket_path)?;
-    let listener = TcpListener::bind(arguments.listen)
+    let tcp = TcpListener::bind(arguments.listen)
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;
-    let (shared, requests) = Shared::new(key_file.serial.to_string(), arguments.log_dir.clone());
-    let mut log = arguments
-        .log_dir
-        .map(SampleLog::new)
-        .transpose()
-        .context("sample log")?;
-    // Report a failing log once, not every sample, and say when it recovers.
-    let mut log_failing = false;
-    let poller = {
-        let shared = Arc::clone(&shared);
-        async move {
-            ble::poll(
-                adapter,
-                key_file,
-                config,
-                Some(requests),
-                shutdown(),
-                move |event| {
-                    let update = Update::from(event);
-                    match &update {
-                        Update::Connected { connection } => {
-                            info!("connected (connection {connection})")
-                        }
-                        Update::Lost { error, consecutive } => {
-                            warn!("BLE failure {consecutive}: {error}; reconnecting");
-                        }
-                        Update::Sample(_) => {}
-                    }
-                    if let (Some(log), Update::Sample(record)) = (&mut log, &update) {
-                        match (log.write(record), log_failing) {
-                            (Err(error), false) => {
-                                error!("sample log: {error:#}; reporting again once it recovers");
-                                log_failing = true;
-                            }
-                            (Ok(()), true) => {
-                                info!("sample log: writing again");
-                                log_failing = false;
-                            }
-                            _ => {}
-                        }
-                    }
-                    shared
-                        .snapshot
-                        .lock()
-                        .expect("snapshot lock")
-                        .apply(&update, SystemTime::now());
-                    // No subscribers is normal.
-                    shared.updates.send(update).ok();
-                    ControlFlow::Continue(())
-                },
-            )
-            .await
-            .context("polling failed")
-        }
-    };
+    let (stop, stopping) = watch::channel(false);
+    let mut units = Vec::new();
+    let mut sockets = Vec::new();
+    // Held until the daemon exits, which removes the sockets.
+    let mut claims = Vec::new();
+    let mut pollers = Vec::new();
+    for key_file in key_files {
+        let serial = key_file.serial.to_string();
+        let socket_path = match &arguments.socket {
+            Some(path) => path.clone(),
+            None => runtime::daemon_path(&serial)?,
+        };
+        let (socket, claimed) = runtime::claim(&socket_path)?;
+        let log_dir = arguments
+            .log_dir
+            .as_ref()
+            .map(|directory| directory.join(&serial));
+        let log = log_dir
+            .clone()
+            .map(SampleLog::new)
+            .transpose()
+            .with_context(|| format!("{serial}: sample log"))?;
+        let unit = Unit::new(serial.clone(), log_dir, stopping.clone());
+        info!("{serial}: listening on {}", socket_path.display());
+        pollers.push(keep_polling(Arc::clone(&unit), key_file, config, log));
+        sockets.push((Arc::clone(&unit), socket));
+        claims.push(claimed);
+        units.push(unit);
+    }
     info!(
-        "listening on {} and http://{} ({})",
-        socket_path.display(),
+        "listening on http://{} ({})",
         arguments.listen,
         if arguments.tcp_control {
             "read-write"
@@ -195,63 +188,174 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
             "read-only"
         }
     );
+    let signalled = stop.clone();
+    let polling = async move {
+        tokio::join!(join_all(pollers), async {
+            shutdown().await;
+            signalled.send_replace(true);
+        });
+        Ok(())
+    };
     let listeners = Listeners {
-        socket,
-        tcp: listener,
+        sockets,
+        tcp,
         tcp_control: arguments.tcp_control,
     };
-    serve(shared, listeners, poller).await
+    serve(units, listeners, polling, stop).await
 }
 
-/// Serves HTTP until `poller` ends, whether a signal stopped it or it
-/// failed, then returns its result.  Open `/events` streams are closed
-/// so shutdown does not wait on their clients.
+/// Polls `unit` until the daemon stops, starting again after a failure:
+/// the unit held by another process, no adapter, or polling ended by an
+/// error.
+async fn keep_polling(
+    unit: Arc<Unit>,
+    key_file: KeyFile,
+    config: PollConfig,
+    mut log: Option<SampleLog>,
+) {
+    // Report a failing log once, not every sample, and say when it
+    // recovers.
+    let mut log_failing = false;
+    // The last failure reported, so one that repeats, such as another
+    // process holding the unit, is reported once until polling gets a
+    // sample or fails another way.
+    let mut reported: Option<String> = None;
+    loop {
+        let samples = unit.snapshot.lock().expect("snapshot lock").samples;
+        let polled = poll(&unit, &key_file, config, &mut log, &mut log_failing).await;
+        let Err(failure) = polled else {
+            return;
+        };
+        let failure = format!("{failure:#}");
+        {
+            let mut snapshot = unit.snapshot.lock().expect("snapshot lock");
+            if snapshot.samples != samples || reported.as_ref() != Some(&failure) {
+                error!(
+                    "{}: {failure}; trying every {RESTART_DELAY:?}, reporting again once it changes",
+                    unit.serial
+                );
+                reported = Some(failure.clone());
+            }
+            snapshot.fail(failure);
+        }
+        tokio::select! {
+            () = sleep(RESTART_DELAY) => {}
+            () = unit.stopped() => return,
+        }
+    }
+}
+
+/// Polls `unit` once, until the daemon stops or polling fails.
+async fn poll(
+    unit: &Unit,
+    key_file: &KeyFile,
+    config: PollConfig,
+    log: &mut Option<SampleLog>,
+    log_failing: &mut bool,
+) -> Result<()> {
+    let _lock = runtime::lock_unit(&unit.serial)?;
+    // A BlueZ session of its own: BlueZ keeps one scan filter per D-Bus
+    // client, so units sharing a session would overwrite each other's.
+    let adapter = ble::default_adapter().await?;
+    let serial = &unit.serial;
+    ble::poll(
+        adapter,
+        key_file.clone(),
+        config,
+        Some(unit.take_commands()),
+        unit.stopped(),
+        |event| {
+            let update = Update::from(event);
+            match &update {
+                Update::Connected { connection } => {
+                    info!("{serial}: connected (connection {connection})");
+                }
+                Update::Lost { error, consecutive } => {
+                    warn!("{serial}: BLE failure {consecutive}: {error}; reconnecting");
+                }
+                Update::Sample(_) => {}
+            }
+            if let (Some(log), Update::Sample(record)) = (log.as_mut(), &update) {
+                match (log.write(record), *log_failing) {
+                    (Err(error), false) => {
+                        error!("{serial}: sample log: {error:#}; reporting again once it recovers");
+                        *log_failing = true;
+                    }
+                    (Ok(()), true) => {
+                        info!("{serial}: sample log: writing again");
+                        *log_failing = false;
+                    }
+                    _ => {}
+                }
+            }
+            unit.snapshot
+                .lock()
+                .expect("snapshot lock")
+                .apply(&update, SystemTime::now());
+            // No subscribers is normal.
+            unit.updates.send(update).ok();
+            ControlFlow::Continue(())
+        },
+    )
+    .await
+    .context("polling failed")
+}
+
 /// Where the daemon serves.
 struct Listeners {
-    /// The full API.
-    socket: UnixListener,
+    /// Each unit's full API.
+    sockets: Vec<(Arc<Unit>, UnixListener)>,
+    /// Every unit, under `/units/<serial>/`.
     tcp: TcpListener,
     /// Whether TCP also takes settings.
     tcp_control: bool,
 }
 
+/// Serves HTTP until `poller` ends, then sets `stop` and returns its
+/// result.  Open `/events` streams are closed so shutdown does not wait
+/// on their clients.
 async fn serve(
-    shared: Arc<Shared>,
+    units: Vec<Arc<Unit>>,
     listeners: Listeners,
     poller: impl Future<Output = Result<()>>,
+    stop: watch::Sender<bool>,
 ) -> Result<()> {
     let polling = async {
         let polled = poller.await;
-        shared.stopping.send_replace(true);
+        stop.send_replace(true);
         polled
     };
-    let socket = axum::serve(listeners.socket, http::router(Arc::clone(&shared), true))
-        .with_graceful_shutdown(shared.stopped())
-        .into_future();
+    let sockets = join_all(listeners.sockets.into_iter().map(|(unit, socket)| {
+        axum::serve(socket, http::socket_router(unit))
+            .with_graceful_shutdown(stopped(stop.subscribe()))
+            .into_future()
+    }));
     let tcp = axum::serve(
         listeners.tcp,
-        http::router(Arc::clone(&shared), listeners.tcp_control),
+        http::tcp_router(&units, listeners.tcp_control),
     )
-    .with_graceful_shutdown(shared.stopped())
+    .with_graceful_shutdown(stopped(stop.subscribe()))
     .into_future();
-    // Requests still open this long after polling ends are dropped, so a
-    // client that never finishes one cannot hold the daemon.
-    let servers = async { tokio::join!(socket, tcp) };
+    // Requests still open this long after stopping starts are dropped, so
+    // a client that never finishes one cannot hold the daemon.
+    let servers = async { tokio::join!(sockets, tcp) };
     let bounded = async {
         tokio::select! {
             served = servers => served,
             () = async {
-                shared.stopped().await;
+                stopped(stop.subscribe()).await;
                 sleep(SHUTDOWN_GRACE).await;
             } => {
-                warn!("dropping requests still open {SHUTDOWN_GRACE:?} after polling ended");
-                (Ok(()), Ok(()))
+                warn!("dropping requests still open {SHUTDOWN_GRACE:?} after stopping");
+                (Vec::new(), Ok(()))
             }
         }
     };
-    let (polled, (socket, tcp)) = tokio::join!(polling, bounded);
+    let (polled, (sockets, tcp)) = tokio::join!(polling, bounded);
     polled?;
-    socket.context("serving the socket")?;
+    for socket in sockets {
+        socket.context("serving a socket")?;
+    }
     tcp.context("serving TCP")
 }
 
@@ -269,6 +373,7 @@ async fn shutdown() {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use anyhow::anyhow;
@@ -278,11 +383,12 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::net::UnixStream;
     use tokio::sync::oneshot;
+    use tokio::sync::watch;
     use tokio::time::timeout;
 
     use super::Listeners;
     use super::SHUTDOWN_GRACE;
-    use super::Shared;
+    use super::Unit;
     use super::serve;
     use jackerymon::control::Setting;
     use jackerymon::status::LightMode;
@@ -304,21 +410,30 @@ mod tests {
 
     #[tokio::test]
     async fn polling_failure_ends_serving_despite_events_clients() {
-        let (shared, _requests) = Shared::new("123456789".to_owned(), None);
+        let (halt, halting) = watch::channel(false);
+        let unit = Unit::new("123456789".to_owned(), None, halting);
         let path = socket_path("failure");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let base = format!("http://{}", tcp.local_addr().expect("address"));
+        let base = format!(
+            "http://{}/units/123456789",
+            tcp.local_addr().expect("address")
+        );
         let (fail, failed) = oneshot::channel::<()>();
         let listeners = Listeners {
-            socket,
+            sockets: vec![(Arc::clone(&unit), socket)],
             tcp,
             tcp_control: false,
         };
-        let served = tokio::spawn(serve(shared, listeners, async move {
-            failed.await.ok();
-            Err(anyhow!("bad key"))
-        }));
+        let served = tokio::spawn(serve(
+            vec![unit],
+            listeners,
+            async move {
+                failed.await.ok();
+                Err(anyhow!("bad key"))
+            },
+            halt,
+        ));
         let over_socket = reqwest::Client::builder()
             .unix_socket(path.clone())
             .build()
@@ -375,20 +490,26 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_never_finished_does_not_hold_shutdown() {
-        let (shared, _requests) = Shared::new("123456789".to_owned(), None);
+        let (halt, halting) = watch::channel(false);
+        let unit = Unit::new("123456789".to_owned(), None, halting);
         let path = socket_path("stalled");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let (fail, failed) = oneshot::channel::<()>();
         let listeners = Listeners {
-            socket,
+            sockets: vec![(Arc::clone(&unit), socket)],
             tcp,
             tcp_control: false,
         };
-        let served = tokio::spawn(serve(shared, listeners, async move {
-            failed.await.ok();
-            Err(anyhow!("stopped"))
-        }));
+        let served = tokio::spawn(serve(
+            vec![unit],
+            listeners,
+            async move {
+                failed.await.ok();
+                Err(anyhow!("stopped"))
+            },
+            halt,
+        ));
         // Headers promise a body that never comes.
         let mut stalled = UnixStream::connect(&path).await.expect("connect");
         stalled
@@ -419,19 +540,25 @@ mod tests {
             tokio::task::JoinHandle<anyhow::Result<()>>,
             runtime::Claimed,
         ) {
-            let (shared, _requests) = Shared::new(serial.to_owned(), None);
+            let (halt, halting) = watch::channel(false);
+            let unit = Unit::new(serial.to_owned(), None, halting);
             let (socket, claimed) = runtime::claim(path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let (stop, stopped) = oneshot::channel::<()>();
             let listeners = Listeners {
-                socket,
+                sockets: vec![(Arc::clone(&unit), socket)],
                 tcp,
                 tcp_control: false,
             };
-            let served = tokio::spawn(serve(shared, listeners, async move {
-                stopped.await.ok();
-                Ok(())
-            }));
+            let served = tokio::spawn(serve(
+                vec![unit],
+                listeners,
+                async move {
+                    stopped.await.ok();
+                    Ok(())
+                },
+                halt,
+            ));
             (stop, served, claimed)
         }
         let path = socket_path("swap");
@@ -456,6 +583,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tcp_serves_every_unit() {
+        let (halt, halting) = watch::channel(false);
+        let serials = ["111", "222"];
+        let directory = socket_path("units").parent().expect("directory").to_owned();
+        let mut units = Vec::new();
+        let mut sockets = Vec::new();
+        let mut claims = Vec::new();
+        for serial in serials {
+            let unit = Unit::new(serial.to_owned(), None, halting.clone());
+            let (socket, claimed) =
+                runtime::claim(&directory.join(format!("{serial}.sock"))).expect("socket");
+            sockets.push((Arc::clone(&unit), socket));
+            claims.push(claimed);
+            units.push(unit);
+        }
+        let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let base = format!("http://{}", tcp.local_addr().expect("address"));
+        let listeners = Listeners {
+            sockets,
+            tcp,
+            tcp_control: false,
+        };
+        let (stop, stopped) = oneshot::channel::<()>();
+        let served = tokio::spawn(serve(
+            units,
+            listeners,
+            async move {
+                stopped.await.ok();
+                Ok(())
+            },
+            halt,
+        ));
+        let get = |path: &str| reqwest::get(format!("{base}{path}"));
+        // A browser at the root lands on the first unit's page, whose
+        // address ends in `/` so the page's relative reads resolve.
+        for path in ["/", "/units/222"] {
+            let page = get(path).await.expect("page");
+            assert!(page.url().path().ends_with('/'), "{}", page.url());
+            assert!(
+                page.text()
+                    .await
+                    .expect("body")
+                    .starts_with("<!doctype html>")
+            );
+        }
+        let landed = get("/?last=600").await.expect("page");
+        assert_eq!(landed.url().path(), "/units/111/");
+        assert_eq!(landed.url().query(), Some("last=600"));
+        let listed: serde_json::Value = get("/units")
+            .await
+            .expect("units")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(listed[1]["serial"], "222");
+        assert_eq!(listed[1]["link"]["state"], "searching");
+        let status: serde_json::Value = get("/units/222/status")
+            .await
+            .expect("status")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(status["serial"], "222");
+        let metrics = get("/metrics")
+            .await
+            .expect("metrics")
+            .text()
+            .await
+            .expect("text");
+        for serial in serials {
+            assert!(
+                metrics.contains(&format!("jackery_connected{{serial=\"{serial}\"}} 0")),
+                "{metrics}"
+            );
+        }
+        stop.send(()).expect("stop");
+        served.await.expect("task").expect("served");
+        drop(claims);
+        fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[tokio::test]
     async fn history_streams_logged_samples_over_tcp() {
         let directory = socket_path("history")
             .parent()
@@ -477,21 +686,30 @@ mod tests {
                 StatusCode::BAD_REQUEST,
             ),
         ] {
-            let (shared, _requests) = Shared::new("123456789".to_owned(), log_dir);
+            let (halt, halting) = watch::channel(false);
+            let unit = Unit::new("123456789".to_owned(), log_dir, halting);
             let path = directory.join("123456789.sock");
             let (socket, claimed) = runtime::claim(&path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-            let base = format!("http://{}", tcp.local_addr().expect("address"));
+            let base = format!(
+                "http://{}/units/123456789",
+                tcp.local_addr().expect("address")
+            );
             let (stop, stopped) = oneshot::channel::<()>();
             let listeners = Listeners {
-                socket,
+                sockets: vec![(Arc::clone(&unit), socket)],
                 tcp,
                 tcp_control: false,
             };
-            let served = tokio::spawn(serve(shared, listeners, async move {
-                stopped.await.ok();
-                Ok(())
-            }));
+            let served = tokio::spawn(serve(
+                vec![unit],
+                listeners,
+                async move {
+                    stopped.await.ok();
+                    Ok(())
+                },
+                halt,
+            ));
             let response = reqwest::get(format!("{base}/history?{query}"))
                 .await
                 .expect("history");

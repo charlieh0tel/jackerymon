@@ -10,11 +10,13 @@ use axum::Router;
 use axum::body::Body;
 use axum::body::Bytes;
 use axum::extract::Query;
+use axum::extract::RawQuery;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::http::header::CACHE_CONTROL;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::IntoResponse;
+use axum::response::Redirect;
 use axum::response::Response;
 use axum::response::sse::Event;
 use axum::response::sse::KeepAlive;
@@ -41,9 +43,10 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::EVENT_KEEP_ALIVE;
-use super::Shared;
+use super::Unit;
 use super::log;
 use super::metrics;
+use super::state::Snapshot;
 use super::web;
 use super::web::View;
 use crate::record::Update;
@@ -63,36 +66,108 @@ const JS_CONTENT_TYPE: &str = "text/javascript; charset=utf-8";
 const PAGE_CACHE_CONTROL: &str = "no-cache";
 /// One JSON value per line.
 const JSON_LINES_CONTENT_TYPE: &str = "application/x-ndjson";
+/// Where TCP lists the units, and under which each unit's routes are.
+const UNITS: &str = "/units";
 /// Prometheus text exposition format, version 0.0.4.
 const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
-/// The routes, with `POST /settings` only when `control` is set.
-pub(super) fn router(shared: Arc<Shared>, control: bool) -> Router {
+/// One unit's routes under `prefix`, `""` or `/units/<serial>`, with
+/// `POST /settings` only when `control` is set.  The page under the
+/// prefix reads the unit's data relative to itself.
+fn unit_routes(prefix: &str, unit: Arc<Unit>, control: bool) -> Router {
     let reads = Router::new()
-        .route("/metrics", get(metrics))
-        .route("/status", get(status))
-        .route("/events", get(events))
-        .route("/history", get(history))
-        .route("/series", get(series))
-        .route("/", get(|| async { page(HTML_CONTENT_TYPE, web::INDEX) }))
+        .route(&format!("{prefix}/metrics"), get(metrics))
+        .route(&format!("{prefix}/status"), get(status))
+        .route(&format!("{prefix}/events"), get(events))
+        .route(&format!("{prefix}/history"), get(history))
+        .route(&format!("{prefix}/series"), get(series))
         .route(
-            "/style.css",
+            &format!("{prefix}/"),
+            get(|| async { page(HTML_CONTENT_TYPE, web::INDEX) }),
+        )
+        .route(
+            &format!("{prefix}/style.css"),
             get(|| async { page(CSS_CONTENT_TYPE, web::STYLE) }),
         )
         .route(
-            "/common.js",
+            &format!("{prefix}/common.js"),
             get(|| async { page(JS_CONTENT_TYPE, web::COMMON) }),
         );
     let routes = if control {
-        reads.route("/settings", post(settings))
+        reads.route(&format!("{prefix}/settings"), post(settings))
     } else {
         reads
     };
-    routes.with_state(shared)
+    routes.with_state(unit)
 }
 
-async fn metrics(State(shared): State<Arc<Shared>>) -> impl IntoResponse {
-    let snapshot = shared.snapshot.lock().expect("snapshot lock").clone();
+/// A unit's own socket: its full API at the root, and `/units` listing
+/// it, as the page asks.
+pub(super) fn socket_router(unit: Arc<Unit>) -> Router {
+    let listed = vec![Arc::clone(&unit)];
+    unit_routes("", unit, true).route(UNITS, get(move || unit_list(listed)))
+}
+
+/// TCP: every unit under `/units/<serial>/`, `/units` listing them, all
+/// their metrics at `/metrics`, and `/` sending a browser to the first.
+pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
+    let all = units.to_vec();
+    let listed = units.to_vec();
+    // Relative, so it resolves against `/`.
+    let first = units
+        .first()
+        .map(|unit| format!("{}/{}/", UNITS.trim_start_matches('/'), unit.serial))
+        .unwrap_or_default();
+    let mut router = Router::new()
+        .route("/", get(move |query| to(first, query)))
+        .route("/metrics", get(move || all_metrics(all)))
+        .route(UNITS, get(move || unit_list(listed)));
+    for unit in units {
+        let prefix = format!("{UNITS}/{}", unit.serial);
+        // The page reads relative to its own address, which must end in
+        // `/`; relative, this resolves against `/units/`.
+        let slashed = format!("{}/", unit.serial);
+        router = router
+            .route(&prefix, get(move |query| to(slashed, query)))
+            .merge(unit_routes(&prefix, Arc::clone(unit), control));
+    }
+    router
+}
+
+/// A redirect to `target`, keeping the query, such as the chart window.
+async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
+    match query {
+        Some(query) => Redirect::to(&format!("{target}?{query}")),
+        None => Redirect::to(&target),
+    }
+}
+
+/// The units served and their links, for the page's unit links.
+async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
+    let listed: Vec<Value> = units
+        .iter()
+        .map(|unit| {
+            let snapshot = unit.snapshot.lock().expect("snapshot lock");
+            json!({ "serial": unit.serial, "link": snapshot.link })
+        })
+        .collect();
+    Json(Value::Array(listed))
+}
+
+/// Every unit's metrics, each family once.
+async fn all_metrics(units: Vec<Arc<Unit>>) -> impl IntoResponse {
+    let snapshots: Vec<Snapshot> = units
+        .iter()
+        .map(|unit| unit.snapshot.lock().expect("snapshot lock").clone())
+        .collect();
+    (
+        [(CONTENT_TYPE, METRICS_CONTENT_TYPE)],
+        metrics::render(&snapshots, SystemTime::now()),
+    )
+}
+
+async fn metrics(State(unit): State<Arc<Unit>>) -> impl IntoResponse {
+    let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
     (
         [(CONTENT_TYPE, METRICS_CONTENT_TYPE)],
         metrics::render(&[snapshot], SystemTime::now()),
@@ -100,8 +175,8 @@ async fn metrics(State(shared): State<Arc<Shared>>) -> impl IntoResponse {
 }
 
 /// Link state, counters, and the latest sample in the `poll` line shape.
-async fn status(State(shared): State<Arc<Shared>>) -> Json<Value> {
-    let snapshot = shared.snapshot.lock().expect("snapshot lock").clone();
+async fn status(State(unit): State<Arc<Unit>>) -> Json<Value> {
+    let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
     Json(json!({
         "serial": snapshot.serial,
         "link": snapshot.link,
@@ -148,8 +223,8 @@ struct SeriesQuery {
 }
 
 /// Chart columns over a range, averaged per bucket; see [`web::series`].
-async fn series(State(shared): State<Arc<Shared>>, Query(query): Query<SeriesQuery>) -> Response {
-    let Some(directory) = shared.log_dir.clone() else {
+async fn series(State(unit): State<Arc<Unit>>, Query(query): Query<SeriesQuery>) -> Response {
+    let Some(directory) = unit.log_dir.clone() else {
         return error(
             StatusCode::NOT_FOUND,
             "no history: the daemon has no --log-dir",
@@ -181,16 +256,16 @@ fn time_range(since: &str, until: Option<&str>) -> Result<(DateTime<Utc>, DateTi
 /// link state and latest sample, then every change until polling ends.
 /// A client that falls behind skips the updates it missed.
 async fn events(
-    State(shared): State<Arc<Shared>>,
+    State(unit): State<Arc<Unit>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // Subscribe before taking the snapshot so nothing falls between them;
     // at worst one update arrives twice, which clients tolerate.
-    let live = BroadcastStream::new(shared.updates.subscribe())
+    let live = BroadcastStream::new(unit.updates.subscribe())
         .filter_map(|update| async move { update.ok() });
-    let replay = shared.snapshot.lock().expect("snapshot lock").replay();
+    let replay = unit.snapshot.lock().expect("snapshot lock").replay();
     let updates = stream::iter(replay)
         .chain(live)
-        .take_until(shared.stopped())
+        .take_until(unit.stopped())
         .map(|update: Update| {
             Ok(Event::default()
                 .json_data(&update)
@@ -209,8 +284,8 @@ struct HistoryQuery {
 
 /// Logged samples in `since..=until`, one JSON line each, oldest first,
 /// streamed from the daily files.
-async fn history(State(shared): State<Arc<Shared>>, Query(query): Query<HistoryQuery>) -> Response {
-    let Some(directory) = shared.log_dir.clone() else {
+async fn history(State(unit): State<Arc<Unit>>, Query(query): Query<HistoryQuery>) -> Response {
+    let Some(directory) = unit.log_dir.clone() else {
         return error(
             StatusCode::NOT_FOUND,
             "no history: the daemon has no --log-dir",
@@ -247,7 +322,7 @@ struct SettingQuery {
 /// Applies one setting given as the unit's one-key body, such as
 /// `{"lm":1}`, and answers once a status read confirms it.
 async fn settings(
-    State(shared): State<Arc<Shared>>,
+    State(unit): State<Arc<Unit>>,
     Query(query): Query<SettingQuery>,
     Json(body): Json<Map<String, Value>>,
 ) -> Response {
@@ -264,10 +339,10 @@ async fn settings(
         );
     }
     let (reply, answer) = oneshot::channel();
-    // `None` once polling has stopped.
+    // `None` while the unit is not being polled.
     let answered = timeout(SETTING_TIMEOUT, async {
-        shared
-            .commands
+        let commands = unit.commands.lock().expect("commands lock").clone();
+        commands
             .send(ControlRequest { setting, reply })
             .await
             .ok()?;
@@ -285,7 +360,7 @@ async fn settings(
             };
             error(code, &control.to_string())
         }
-        Ok(None) => error(StatusCode::SERVICE_UNAVAILABLE, "polling has stopped"),
+        Ok(None) => error(StatusCode::SERVICE_UNAVAILABLE, "not polling the unit"),
         Err(_) => error(
             StatusCode::GATEWAY_TIMEOUT,
             &format!("{setting}: no answer within {SETTING_TIMEOUT:?}; not sent if still queued"),
@@ -319,13 +394,14 @@ mod tests {
     use jackerymon::status::LightMode;
     use serde_json::json;
     use tokio::sync::oneshot;
+    use tokio::sync::watch;
 
     use super::SettingQuery;
     use super::author;
     use super::parse_setting;
     use super::settings;
     use crate::daemon::COMMAND_BUFFER;
-    use crate::daemon::Shared;
+    use crate::daemon::Unit;
 
     #[test]
     fn author_is_a_name_without_an_address() {
@@ -347,12 +423,14 @@ mod tests {
     /// instead of waiting for room.
     #[tokio::test(start_paused = true)]
     async fn full_queue_counts_against_the_deadline() {
-        let (shared, _requests) = Shared::new("123456789".to_owned(), None);
+        let (_halt, halting) = watch::channel(false);
+        let unit = Unit::new("123456789".to_owned(), None, halting);
+        let _requests = unit.take_commands();
+        let commands = unit.commands.lock().expect("commands lock").clone();
         let light = Setting::Light(LightMode::Low);
         for _ in 0..COMMAND_BUFFER {
             let (reply, _) = oneshot::channel();
-            shared
-                .commands
+            commands
                 .try_send(ControlRequest {
                     setting: light,
                     reply,
@@ -360,7 +438,7 @@ mod tests {
                 .expect("room");
         }
         let response = settings(
-            State(shared),
+            State(unit),
             Query(SettingQuery { confirm: false }),
             Json(json!({"lm": 1}).as_object().expect("object").clone()),
         )

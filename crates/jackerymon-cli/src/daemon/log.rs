@@ -1,6 +1,6 @@
-//! Daily JSON-lines sample log: one `YYYY-MM-DD.jsonl` file per UTC day.
-//! `jackerymon compress-logs` gzips the finished days; the daemon itself
-//! never compresses or deletes.
+//! Daily JSON-lines sample log: one `<serial>/YYYY-MM-DD.jsonl` file per
+//! unit and UTC day.  `jackerymon compress-logs` gzips the finished days;
+//! the daemon itself never compresses or deletes.
 
 use std::fs;
 use std::fs::File;
@@ -40,7 +40,7 @@ const PARTIAL_SUFFIX: &str = ".partial";
 /// Options of `jackerymon compress-logs`.
 #[derive(Args)]
 pub(crate) struct CompressArgs {
-    /// The daemon's `--log-dir`.
+    /// The daemon's `--log-dir`; each unit's directory in it is done too.
     directory: PathBuf,
 }
 
@@ -48,16 +48,35 @@ pub(crate) struct CompressArgs {
 pub(crate) fn compress_logs(arguments: &CompressArgs) -> Result<()> {
     let today = Utc::now().format(DATE_FORMAT).to_string();
     let mut failures = 0;
-    for path in finished_days(&arguments.directory, &today)? {
-        if let Err(error) = compress(&path) {
-            log::error!("{}: {error:#}", path.display());
-            failures += 1;
+    let mut directories = vec![arguments.directory.clone()];
+    directories.extend(subdirectories(&arguments.directory)?);
+    for directory in directories {
+        for path in finished_days(&directory, &today)? {
+            if let Err(error) = compress(&path) {
+                log::error!("{}: {error:#}", path.display());
+                failures += 1;
+            }
         }
     }
     if failures > 0 {
         bail!("{failures} log files left uncompressed");
     }
     Ok(())
+}
+
+/// The directories in `directory`, one per unit, sorted.
+fn subdirectories(directory: &Path) -> Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    for entry in
+        fs::read_dir(directory).with_context(|| format!("reading {}", directory.display()))?
+    {
+        let entry = entry.with_context(|| format!("reading {}", directory.display()))?;
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            found.push(entry.path());
+        }
+    }
+    found.sort();
+    Ok(found)
 }
 
 /// Uncompressed logs of days before `today`, by the date in their names.
@@ -217,9 +236,17 @@ pub(super) struct SampleLog {
 }
 
 impl SampleLog {
-    /// Opens today's file, so an unusable directory fails at startup
-    /// rather than on every sample.
+    /// Makes `directory`, a unit's, if need be, and opens today's file,
+    /// so an unusable directory fails at startup rather than on every
+    /// sample.  The directory above it must exist, so a mistyped
+    /// `--log-dir` fails.
     pub(super) fn new(directory: PathBuf) -> Result<Self> {
+        match fs::create_dir(&directory) {
+            Err(error) if error.kind() != ErrorKind::AlreadyExists => {
+                return Err(error).with_context(|| format!("creating {}", directory.display()));
+            }
+            _ => {}
+        }
         let day = Utc::now().format(DATE_FORMAT).to_string();
         let file = open(&directory, &day)?;
         Ok(Self {
@@ -270,8 +297,10 @@ mod tests {
 
     use flate2::read::GzDecoder;
 
+    use super::CompressArgs;
     use super::SampleLog;
     use super::compress;
+    use super::compress_logs;
     use super::finished_days;
     use super::read_history;
     use crate::record::SampleRecord;
@@ -370,6 +399,32 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0, "no temporary archive is left");
         fs::remove_dir_all(&directory).expect("cleanup");
+    }
+
+    #[test]
+    fn compresses_each_units_directory() {
+        let directory =
+            std::env::temp_dir().join(format!("jackerymon-units-{}", std::process::id()));
+        let unit = directory.join("123456789");
+        fs::create_dir_all(&unit).expect("temp dir");
+        for path in [
+            directory.join("2026-10-10.jsonl"),
+            unit.join("2026-10-10.jsonl"),
+        ] {
+            fs::write(path, "{}\n").expect("write");
+        }
+        compress_logs(&CompressArgs {
+            directory: directory.clone(),
+        })
+        .expect("compress");
+        let done = [
+            directory.join("2026-10-10.jsonl.gz"),
+            unit.join("2026-10-10.jsonl.gz"),
+        ]
+        .iter()
+        .all(|path| path.exists());
+        fs::remove_dir_all(&directory).expect("cleanup");
+        assert!(done);
     }
 
     #[test]

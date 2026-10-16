@@ -29,6 +29,36 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   );
 });
 
+test("one unit gets no unit links", async ({ page }) => {
+  const fake = new Fake();
+  await open(page, fake);
+  await expect(page.locator("#status .pill")).toHaveText("LIVE");
+  await expect.poll(() => fake.seen.units).toBe(1);
+  await expect(page.locator("#units")).toBeHidden();
+});
+
+test("several units get links that keep the chart window", async ({ page }) => {
+  const fake = new Fake();
+  fake.units.push({ serial: "987654321", link: { state: "searching" } });
+  await open(page, fake, "/units/855125071405677/?last=600");
+  const links = page.locator("#units a");
+  await expect(links).toHaveText(["855125071405677", "987654321"]);
+  await expect(links.first()).toHaveAttribute("aria-current", "page");
+  await expect(links.nth(1)).toHaveAttribute("href", "../987654321/?last=600");
+  // Reads go to the unit's own address.
+  expect(fake.seen.status).toBeGreaterThan(0);
+  await page.locator("#ranges button", { hasText: "24 h" }).click();
+  await expect(links.nth(1)).toHaveAttribute("href", "../987654321/?last=86400");
+});
+
+test("polling that failed says it restarts, and why", async ({ page }) => {
+  const fake = new Fake();
+  fake.failed = "polling failed: bad key";
+  await open(page, fake);
+  await expect(page.locator("#status .pill").first()).toHaveText("RESTARTING");
+  await expect(page.locator("#status")).toContainText("bad key");
+});
+
 test("an old reading is stale, a lost link says why", async ({ page }) => {
   const fake = new Fake();
   fake.age = 300;

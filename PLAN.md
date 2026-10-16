@@ -26,10 +26,15 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
   interactive commands, `/etc/jackerymon/` for the daemon; `--unit
   SERIAL` chooses, and is optional when one key is present.
-- **Several units: one daemon per unit.**  Each instance owns one unit's
-  connection and port; one adapter can hold several connections.  The
-  package's unit serves one unit; a template (`jackerymon@<serial>`)
-  waits for a second unit.
+- **Several units: one daemon, a poller per unit** (2026-10-16; until
+  then one daemon per unit).  The daemon serves every key in
+  `/etc/jackerymon`, or the one `--unit` names: one port, one scrape,
+  one page with links between units.  Each unit has its own BlueZ
+  session (BlueZ keeps one scan filter per D-Bus client, so pollers
+  sharing one overwrite each other's), lock, socket, and log
+  directory.  A unit whose polling fails, or that another process
+  holds, tries again after 5 s without touching the others.  A key
+  that does not load is reported and left out.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty
   random-type advertisement can take over its BlueZ object and hide it
   (`FINDINGS.md`, Duplicate advertisement).  Recovery needs BlueZ
@@ -98,21 +103,25 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   value, Enter applies it, the menu stays open. The requested value
   stays on screen while it applies. Each sample is aged by its own
   timestamp, so an old one replayed by a daemon does not look fresh.
-- **Daemon.**  Owns the connection and retries forever.  The full API is
-  on a Unix socket per unit, `<runtime directory>/jackerymon/<serial>.sock`:
+- **Daemon.**  Owns the connections and retries forever.  Each unit's
+  full API is on its own Unix socket,
+  `<runtime directory>/jackerymon/<serial>.sock`:
   `GET /metrics` (Prometheus), `GET /status`, `GET /events` (server-sent
   events, current state first), `GET /history` (logged samples between
   two RFC 3339 times, streamed as JSON lines from the daily files,
   gzipped or not; the TUI fetches its chart window from it), `GET
   /series` and the web view (below), and `POST /settings` (the unit's
   one-key body; answers once status confirms it, within 60 s including
-  queueing).  TCP, `127.0.0.1:9888` by default, serves the read-only
-  routes unless `--tcp-control`.  A daemon refuses to start while
+  queueing).  TCP, `127.0.0.1:9888` by default, serves each unit's
+  read-only routes under `/units/<serial>/` unless `--tcp-control`,
+  every unit's metrics at `/metrics`, the units at `/units`, and sends
+  `/` to the first unit's page.  A daemon refuses to start while
   another answers on its socket, and replaces a dead one's leftover.
-  Optional `--log-dir` writes daily JSON-lines files.  Readings
-  older than 60 s are left out of `/metrics`.  When polling ends, by
-  signal or fatal error, HTTP stops too and the daemon exits with the
-  polling result, so a supervisor sees failures.
+  Optional `--log-dir` writes daily JSON-lines files, in a directory
+  per unit.  Readings older than 60 s are left out of `/metrics`.  A
+  signal stops polling and HTTP; what stops the daemon otherwise is a
+  startup failure: no usable key, a socket another daemon answers on,
+  an unusable log directory, or the TCP address.
 - **Web view, after smartclock-web.**  The daemon serves one page at
   `/` over TCP, read-only: a status strip polled every second; power
   and battery charts over the last 10 min, 6 h, 24 h or 7 d, or any
@@ -134,7 +143,8 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   left's gridlines.  Same
   look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
   smartclock-web; served by the daemon rather than a separate process,
-  since one daemon owns one unit.  `/series` averages samples into
+  at each unit's address, and reads relative to it, so the same files
+  work over TCP and a unit's socket.  `/series` averages samples into
   intervals of at most 5,000 points, and marks a stretch with no
   sample for over a minute (the `/metrics` staleness limit) and at
   least one empty interval with a row of nulls, so the charts break
@@ -170,7 +180,7 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   `JACKERYMON_TCP_CONTROL`, which the daemon also reads from its
   environment.  A conffile, so edits survive upgrades.
 - **Sample logs are kept forever, gzipped once a day ends,** in
-  `/var/lib/jackerymon` (data, not disposable logs).  The daemon
+  `/var/lib/jackerymon/<serial>` (data, not disposable logs).  The daemon
   only appends; `jackerymon compress-logs`, run daily by a timer that
   the daemon's unit pulls in, compresses finished days (about 1 MB a day
   compressed, 10 MB plain).  Nothing deletes them.
