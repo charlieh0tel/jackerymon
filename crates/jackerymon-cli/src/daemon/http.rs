@@ -133,15 +133,15 @@ pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
 
 /// The units and their links, connected ones first, each group by
 /// serial.
-fn ordered(units: &[Arc<Unit>]) -> Vec<(String, Link)> {
-    let mut listed: Vec<(String, Link)> = units
+fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
+    let mut listed: Vec<(&Unit, Link)> = units
         .iter()
         .map(|unit| {
             let link = unit.snapshot.lock().expect("snapshot lock").link.clone();
-            (unit.serial.clone(), link)
+            (unit.as_ref(), link)
         })
         .collect();
-    listed.sort_by_key(|(serial, link)| (!matches!(link, Link::Connected), serial.clone()));
+    listed.sort_by_key(|(unit, link)| (!matches!(link, Link::Connected), unit.serial.clone()));
     listed
 }
 
@@ -151,7 +151,7 @@ async fn first_unit(units: Vec<Arc<Unit>>, query: RawQuery) -> Redirect {
     let first = ordered(&units)
         .into_iter()
         .next()
-        .map(|(serial, _)| format!("{}/{serial}/", UNITS.trim_start_matches('/')))
+        .map(|(unit, _)| format!("{}/{}/", UNITS.trim_start_matches('/'), unit.serial))
         .unwrap_or_default();
     to(first, query).await
 }
@@ -169,7 +169,14 @@ async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
 async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
     let listed: Vec<Value> = ordered(&units)
         .into_iter()
-        .map(|(serial, link)| json!({ "serial": serial, "link": link }))
+        .map(|(unit, link)| {
+            json!({
+                "serial": unit.serial,
+                "model": unit.model.0,
+                "model_name": unit.model.name(),
+                "link": link,
+            })
+        })
         .collect();
     Json(Value::Array(listed))
 }
@@ -199,6 +206,8 @@ async fn status(State(unit): State<Arc<Unit>>) -> Json<Value> {
     let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
     Json(json!({
         "serial": snapshot.serial,
+        "model": unit.model.0,
+        "model_name": unit.model.name(),
         "link": snapshot.link,
         "samples": snapshot.samples,
         "connections": snapshot.connections,
@@ -410,6 +419,7 @@ mod tests {
     use axum::extract::State;
     use axum::http::StatusCode;
     use jackerymon::control::Setting;
+    use jackerymon::identity::ModelCode;
     use jackerymon::poll::ControlRequest;
     use jackerymon::status::LightMode;
     use serde_json::json;
@@ -444,7 +454,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn full_queue_counts_against_the_deadline() {
         let (_halt, halting) = watch::channel(false);
-        let unit = Unit::new("123456789".to_owned(), None, halting);
+        let unit = Unit::new(
+            "123456789".to_owned(),
+            ModelCode::EXPLORER_2000,
+            None,
+            halting,
+        );
         let _requests = unit.take_commands();
         let commands = unit.commands.lock().expect("commands lock").clone();
         let light = Setting::Light(LightMode::Low);

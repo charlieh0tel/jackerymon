@@ -93,7 +93,7 @@ links to the others; its `/metrics` covers every unit, labeled
 
 | Route, per unit | Gives | TCP |
 |---|---|---|
-| `GET /status` | link state, counters, latest sample | yes |
+| `GET /status` | model, link state, counters, latest sample | yes |
 | `GET /metrics` | Prometheus `jackery_*` metrics | yes |
 | `GET /events` | server-sent events: current state, then changes | yes |
 | `GET /history?since=…&until=…` | logged samples, JSON lines; needs `--log-dir` | yes |

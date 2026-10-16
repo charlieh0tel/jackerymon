@@ -32,6 +32,7 @@ use anyhow::bail;
 use clap::Args;
 use futures::future::join_all;
 use jackerymon::ble;
+use jackerymon::identity::ModelCode;
 use jackerymon::key_file::KeyFile;
 use jackerymon::poll::ControlRequest;
 use jackerymon::poll::PollConfig;
@@ -94,6 +95,7 @@ pub(crate) struct DaemonArgs {
 /// One unit: what its poller and HTTP handlers share.
 struct Unit {
     serial: String,
+    model: ModelCode,
     snapshot: Mutex<Snapshot>,
     updates: broadcast::Sender<Update>,
     /// The running poll's settings queue.  Replaced each time polling
@@ -107,13 +109,19 @@ struct Unit {
 }
 
 impl Unit {
-    fn new(serial: String, log_dir: Option<PathBuf>, stopping: watch::Receiver<bool>) -> Arc<Self> {
+    fn new(
+        serial: String,
+        model: ModelCode,
+        log_dir: Option<PathBuf>,
+        stopping: watch::Receiver<bool>,
+    ) -> Arc<Self> {
         let (updates, _) = broadcast::channel(EVENT_BUFFER);
         // Closed until polling starts, so a setting fails at once.
         let (commands, _) = mpsc::channel(COMMAND_BUFFER);
         Arc::new(Self {
             snapshot: Mutex::new(Snapshot::new(serial.clone())),
             serial,
+            model,
             updates,
             commands: Mutex::new(commands),
             stopping,
@@ -172,7 +180,7 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
             .map(SampleLog::new)
             .transpose()
             .with_context(|| format!("{serial}: sample log"))?;
-        let unit = Unit::new(serial.clone(), log_dir, stopping.clone());
+        let unit = Unit::new(serial.clone(), key_file.model, log_dir, stopping.clone());
         info!("{serial}: listening on {}", socket_path.display());
         pollers.push(keep_polling(Arc::clone(&unit), key_file, config, log));
         sockets.push((Arc::clone(&unit), socket));
@@ -392,6 +400,7 @@ mod tests {
     use super::serve;
     use crate::record::Update;
     use jackerymon::control::Setting;
+    use jackerymon::identity::ModelCode;
     use jackerymon::status::LightMode;
 
     use crate::daemon_client::DaemonClient;
@@ -412,7 +421,12 @@ mod tests {
     #[tokio::test]
     async fn polling_failure_ends_serving_despite_events_clients() {
         let (halt, halting) = watch::channel(false);
-        let unit = Unit::new("123456789".to_owned(), None, halting);
+        let unit = Unit::new(
+            "123456789".to_owned(),
+            ModelCode::EXPLORER_2000,
+            None,
+            halting,
+        );
         let path = socket_path("failure");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -492,7 +506,12 @@ mod tests {
     #[tokio::test]
     async fn a_request_never_finished_does_not_hold_shutdown() {
         let (halt, halting) = watch::channel(false);
-        let unit = Unit::new("123456789".to_owned(), None, halting);
+        let unit = Unit::new(
+            "123456789".to_owned(),
+            ModelCode::EXPLORER_2000,
+            None,
+            halting,
+        );
         let path = socket_path("stalled");
         let (socket, claimed) = runtime::claim(&path).expect("socket");
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -542,7 +561,7 @@ mod tests {
             runtime::Claimed,
         ) {
             let (halt, halting) = watch::channel(false);
-            let unit = Unit::new(serial.to_owned(), None, halting);
+            let unit = Unit::new(serial.to_owned(), ModelCode::EXPLORER_2000, None, halting);
             let (socket, claimed) = runtime::claim(path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let (stop, stopped) = oneshot::channel::<()>();
@@ -592,7 +611,12 @@ mod tests {
         let mut sockets = Vec::new();
         let mut claims = Vec::new();
         for serial in serials {
-            let unit = Unit::new(serial.to_owned(), None, halting.clone());
+            let unit = Unit::new(
+                serial.to_owned(),
+                ModelCode::EXPLORER_2000,
+                None,
+                halting.clone(),
+            );
             let (socket, claimed) =
                 runtime::claim(&directory.join(format!("{serial}.sock"))).expect("socket");
             sockets.push((Arc::clone(&unit), socket));
@@ -648,6 +672,7 @@ mod tests {
             .await
             .expect("json");
         assert_eq!(status["serial"], "222");
+        assert_eq!(status["model_name"], "Explorer 2000 v2");
         // A connected unit comes first.
         connected.snapshot.lock().expect("snapshot lock").apply(
             &Update::Connected { connection: 1 },
@@ -702,7 +727,12 @@ mod tests {
             ),
         ] {
             let (halt, halting) = watch::channel(false);
-            let unit = Unit::new("123456789".to_owned(), log_dir, halting);
+            let unit = Unit::new(
+                "123456789".to_owned(),
+                ModelCode::EXPLORER_2000,
+                log_dir,
+                halting,
+            );
             let path = directory.join("123456789.sock");
             let (socket, claimed) = runtime::claim(&path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");

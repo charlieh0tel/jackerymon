@@ -21,7 +21,7 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   await expect(strip).toContainText("24.1 °C");
   await expect(strip).toContainText("charging");
   const colophon = page.locator("#colophon");
-  await expect(colophon).toContainText("Jackery 855125071405677");
+  await expect(colophon).toContainText("Jackery Explorer 2000 v2 855125071405677");
   await expect(colophon).toContainText("© Christopher Hoover");
   await expect(colophon.locator("a", { hasText: "issues" })).toHaveAttribute(
     "href",
@@ -39,10 +39,10 @@ test("one unit gets no unit links", async ({ page }) => {
 
 test("several units get links that keep the chart window", async ({ page }) => {
   const fake = new Fake();
-  fake.units.push({ serial: "987654321", link: { state: "searching" } });
+  fake.units.push({ serial: "987654321", model: 99, model_name: null, link: { state: "searching" } });
   await open(page, fake, "/units/855125071405677/?last=600");
   const links = page.locator("#units a");
-  await expect(links).toHaveText(["855125071405677", "987654321"]);
+  await expect(links).toHaveText(["Explorer 2000 v2 855125071405677", "model 99 987654321"]);
   await expect(links.first()).toHaveAttribute("aria-current", "page");
   await expect(links.nth(1)).toHaveAttribute("href", "../987654321/?last=600");
   // Reads go to the unit's own address.

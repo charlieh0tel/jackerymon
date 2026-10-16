@@ -75,6 +75,16 @@ impl ModelCode {
     /// takes the same codec in the app but has not answered.
     pub const SUPPORTED: [Self; 2] = [Self::EXPLORER_2000, Self::EXPLORER_3000];
 
+    /// The product's name, for a model that has one here.
+    #[must_use]
+    pub fn name(self) -> Option<&'static str> {
+        match self {
+            Self::EXPLORER_2000 => Some("Explorer 2000 v2"),
+            Self::EXPLORER_3000 => Some("Explorer 3000"),
+            _ => None,
+        }
+    }
+
     /// [`Self::SUPPORTED`], for messages.
     #[must_use]
     pub fn supported_list() -> String {

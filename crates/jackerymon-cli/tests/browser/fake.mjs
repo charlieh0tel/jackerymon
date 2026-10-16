@@ -32,7 +32,8 @@ export class Fake {
     this.up = true;
     this.lost = null;
     this.failed = null;
-    this.units = [{ serial: RECORDED.status.serial, link: { state: "connected" } }];
+    const { serial, model, model_name } = RECORDED.status;
+    this.units = [{ serial, model, model_name, link: { state: "connected" } }];
     this.age = 2;
     this.series = structuredClone(RECORDED.series);
     this.delay = {};

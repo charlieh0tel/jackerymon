@@ -1,5 +1,7 @@
 {
   "serial": "855125071405677",
+  "model": 12,
+  "model_name": "Explorer 2000 v2",
   "version": "0.1.3",
   "author": "Christopher Hoover",
   "license": "MIT OR Apache-2.0",

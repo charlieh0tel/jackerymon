@@ -124,7 +124,7 @@ function render(s) {
     (s.link?.error ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
   const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
   $("colophon").innerHTML = [
-    `Jackery ${esc(s.serial)}`,
+    `Jackery ${esc(productName(s))} ${esc(s.serial)}`,
     `jackerymon ${esc(s.version ?? "")}`,
     "read-only",
     `© ${esc(s.author ?? "")}`,
@@ -135,6 +135,9 @@ function render(s) {
 }
 
 // ---------------------------------------------------------------- units
+
+// The product's name, or its model code when the daemon has no name.
+const productName = (u) => u.model_name ?? `model ${u.model}`;
 
 // The units the daemon serves, from `/units`, two levels up from a
 // unit's page; empty until read.
@@ -152,9 +155,9 @@ function drawUnits() {
   el.hidden = units.length < 2;
   const here = latest?.serial;
   el.innerHTML = units
-    .map(({ serial }) =>
-      `<a href="../${esc(encodeURIComponent(serial))}/${esc(location.search)}"` +
-      `${serial === here ? ' aria-current="page"' : ""}>${esc(serial)}</a>`)
+    .map((u) =>
+      `<a href="../${esc(encodeURIComponent(u.serial))}/${esc(location.search)}"` +
+      `${u.serial === here ? ' aria-current="page"' : ""}>${esc(productName(u))} ${esc(u.serial)}</a>`)
     .join(" ");
 }
 

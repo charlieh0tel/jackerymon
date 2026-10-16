@@ -152,8 +152,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   sample for over a minute (the `/metrics` staleness limit) and at
   least one empty interval with a row of nulls, so the charts break
   there rather than draw across it; `/status` carries the reading
-  worded as the TUI words it (`text.rs`), and the
-  footer's author, license and repository from Cargo metadata.  Playwright tests fake the API
+  worded as the TUI words it (`text.rs`), the unit's model and product
+  name, and the footer's author, license and repository from Cargo
+  metadata.  Playwright tests fake the API
   per test; because the daemon needs a key and an adapter to start, they
   serve the page's files from the tree, and a Rust test checks the
   daemon serves the same paths.
