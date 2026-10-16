@@ -13,9 +13,10 @@ cargo test
 
 ## Hardware
 
-Tested: an Explorer 2000 v2 (app model code 12) and an Explorer 3000
-(14), both advertising as `HT`, from a laptop with an Intel Bluetooth
-controller, Ubuntu 25.04, Linux 6.14, and BlueZ 5.79.
+Tested: two Explorer 2000 v2s (app model code 12) and an Explorer 3000
+(14), all advertising as `HT`, polled at once by one daemon, from a
+laptop with an Intel Bluetooth controller, Ubuntu 25.04, Linux 6.14,
+and BlueZ 5.79.
 
 Other units:
 

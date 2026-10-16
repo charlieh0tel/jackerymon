@@ -46,6 +46,7 @@ use super::EVENT_KEEP_ALIVE;
 use super::Unit;
 use super::log;
 use super::metrics;
+use super::state::Link;
 use super::state::Snapshot;
 use super::web;
 use super::web::View;
@@ -113,13 +114,9 @@ pub(super) fn socket_router(unit: Arc<Unit>) -> Router {
 pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     let all = units.to_vec();
     let listed = units.to_vec();
-    // Relative, so it resolves against `/`.
-    let first = units
-        .first()
-        .map(|unit| format!("{}/{}/", UNITS.trim_start_matches('/'), unit.serial))
-        .unwrap_or_default();
+    let chosen = units.to_vec();
     let mut router = Router::new()
-        .route("/", get(move |query| to(first, query)))
+        .route("/", get(move |query| first_unit(chosen, query)))
         .route("/metrics", get(move || all_metrics(all)))
         .route(UNITS, get(move || unit_list(listed)));
     for unit in units {
@@ -134,6 +131,31 @@ pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     router
 }
 
+/// The units and their links, connected ones first, each group by
+/// serial.
+fn ordered(units: &[Arc<Unit>]) -> Vec<(String, Link)> {
+    let mut listed: Vec<(String, Link)> = units
+        .iter()
+        .map(|unit| {
+            let link = unit.snapshot.lock().expect("snapshot lock").link.clone();
+            (unit.serial.clone(), link)
+        })
+        .collect();
+    listed.sort_by_key(|(serial, link)| (!matches!(link, Link::Connected), serial.clone()));
+    listed
+}
+
+/// A redirect to the first unit's page, as [`ordered`] puts them.
+async fn first_unit(units: Vec<Arc<Unit>>, query: RawQuery) -> Redirect {
+    // Relative, so it resolves against `/`.
+    let first = ordered(&units)
+        .into_iter()
+        .next()
+        .map(|(serial, _)| format!("{}/{serial}/", UNITS.trim_start_matches('/')))
+        .unwrap_or_default();
+    to(first, query).await
+}
+
 /// A redirect to `target`, keeping the query, such as the chart window.
 async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
     match query {
@@ -142,14 +164,12 @@ async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
     }
 }
 
-/// The units served and their links, for the page's unit links.
+/// The units served and their links, as [`ordered`] puts them, for the
+/// page's unit links.
 async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
-    let listed: Vec<Value> = units
-        .iter()
-        .map(|unit| {
-            let snapshot = unit.snapshot.lock().expect("snapshot lock");
-            json!({ "serial": unit.serial, "link": snapshot.link })
-        })
+    let listed: Vec<Value> = ordered(&units)
+        .into_iter()
+        .map(|(serial, link)| json!({ "serial": serial, "link": link }))
         .collect();
     Json(Value::Array(listed))
 }

@@ -390,6 +390,7 @@ mod tests {
     use super::SHUTDOWN_GRACE;
     use super::Unit;
     use super::serve;
+    use crate::record::Update;
     use jackerymon::control::Setting;
     use jackerymon::status::LightMode;
 
@@ -598,6 +599,7 @@ mod tests {
             claims.push(claimed);
             units.push(unit);
         }
+        let connected = Arc::clone(&units[1]);
         let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let base = format!("http://{}", tcp.local_addr().expect("address"));
         let listeners = Listeners {
@@ -646,6 +648,19 @@ mod tests {
             .await
             .expect("json");
         assert_eq!(status["serial"], "222");
+        // A connected unit comes first.
+        connected.snapshot.lock().expect("snapshot lock").apply(
+            &Update::Connected { connection: 1 },
+            std::time::SystemTime::now(),
+        );
+        assert_eq!(get("/").await.expect("page").url().path(), "/units/222/");
+        let listed: serde_json::Value = get("/units")
+            .await
+            .expect("units")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(listed[0]["serial"], "222");
         let metrics = get("/metrics")
             .await
             .expect("metrics")
@@ -654,7 +669,7 @@ mod tests {
             .expect("text");
         for serial in serials {
             assert!(
-                metrics.contains(&format!("jackery_connected{{serial=\"{serial}\"}} 0")),
+                metrics.contains(&format!("jackery_connected{{serial=\"{serial}\"}}")),
                 "{metrics}"
             );
         }
