@@ -131,7 +131,8 @@ pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     router
 }
 
-/// The units and their links, by serial.
+/// The units and their links, connected ones first, each group by
+/// serial.
 fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
     let mut listed: Vec<(&Unit, Link)> = units
         .iter()
@@ -140,7 +141,7 @@ fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
             (unit.as_ref(), link)
         })
         .collect();
-    listed.sort_by(|(one, _), (other, _)| one.serial.cmp(&other.serial));
+    listed.sort_by_key(|(unit, link)| (!matches!(link, Link::Connected), unit.serial.clone()));
     listed
 }
 

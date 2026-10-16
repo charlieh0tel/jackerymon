@@ -87,9 +87,9 @@ sets the filter.
 unit's full API on its own Unix socket,
 `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock` (packaged:
 `/run/jackerymon/`), and the read-only routes over TCP, each unit's
-under `/units/<serial>`.  TCP's `/` opens the first unit's page by
-serial, where a chooser lists every unit, its model, and whether it is
-connected; its `/metrics` covers every unit, labeled `serial`;
+under `/units/<serial>`.  TCP's `/` opens the first unit's page, where
+a chooser lists every unit, its model, and whether it is connected,
+connected ones first, each group by serial; its `/metrics` covers every unit, labeled `serial`;
 `/units` lists them.
 
 | Route, per unit | Gives | TCP |

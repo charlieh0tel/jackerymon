@@ -140,7 +140,7 @@ function render(s) {
 // The product's name, or its model code when the daemon has no name.
 const productName = (u) => u.model_name ?? `model ${u.model}`;
 
-// The units the daemon serves, by serial, from `/units`, two levels up
+// The units the daemon serves, connected ones first, from `/units`, two levels up
 // from a unit's page; empty until read.  Read again this often, so each
 // one's link state stays current.
 let units = [];
