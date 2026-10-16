@@ -49,6 +49,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   object holding the unit's address; scan LE only with a discovery
   pattern of that address, so BlueZ makes no objects for other devices;
   accept only a unit with an RSSI, meaning heard during this scan.
+  After three searches in a row miss the unit, remove its object if it
+  is not connected, paired or trusted, logging what it held.  A failed
+  connect is cancelled: BlueZ goes on with a `Connect` nobody waits
+  for, refusing every other connection meanwhile.
 - **Library logging through `log`.**  The library reports recoveries it
   makes on its own, such as reusing a connection or removing the stale
   object.  The CLI logs to stderr with `env_logger`, except in `tui`,

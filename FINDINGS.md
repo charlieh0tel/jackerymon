@@ -447,6 +447,24 @@ AC and DC output on with no reported load, and the unit then drew
 it down while on mains is unknown; the outlets were on mains, so not
 the inverter.
 
+## One daemon, three units (2026-10-16)
+
+A connect that timed out on our side stayed pending in BlueZ, which
+then refused every connection on the adapter, to any unit, with
+"Operation already in progress" for about 35 s.  The failed attempt's
+cleanup only disconnected a device BlueZ showed connected, so the
+pending one was never cancelled.
+
+After one such timeout, polling of `90:E5:B1:21:ED:BA` failed with
+"saved device identity not found" for 25 minutes while the unit
+advertised (icon flashing; a separate scanning process saw it, also
+with two other units connected) and nothing held a link to it
+(`hcitool con`).  The library's removal of the empty random-type
+object never fired, so the object was something else; what it held
+was not captured.  Stopping the daemon cleared it, and the unit
+connected at once on restart.  Polling now removes the unit's object,
+logging its state, after three searches in a row miss it.
+
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
 
 The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer

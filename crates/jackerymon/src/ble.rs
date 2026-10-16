@@ -53,6 +53,9 @@ const SERVICE: Uuid = bluetooth_uuid(0xbdee);
 /// Bound on BlueZ calls outside a connect attempt, such as finding the
 /// adapter; bluer's own D-Bus timeout is two minutes.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Searches in a row that miss the unit before its BlueZ object is
+/// removed; see [`Unit::clear_stale`].
+const STALE_AFTER_MISSES: u32 = 3;
 /// Held while a unit is found and connected.  BlueZ makes one LE
 /// connection at a time per adapter and fails a second attempt with
 /// "Operation already in progress", so units polled by one process take
@@ -139,6 +142,7 @@ pub async fn poll(
         adapter,
         address,
         key_file,
+        misses: 0,
     };
     poll_with(unit, config, commands, stop, on_event).await
 }
@@ -226,6 +230,8 @@ struct Unit {
     /// The key file's address, parsed.
     address: Address,
     key_file: KeyFile,
+    /// Searches in a row that did not find the unit.
+    misses: u32,
 }
 
 impl Unit {
@@ -255,6 +261,33 @@ impl Unit {
         .await?;
         info!(
             "removed BlueZ's random-type object for {}, left by the unit's empty duplicate advertisement",
+            self.address
+        );
+        Ok(())
+    }
+
+    /// Removes BlueZ's object for the unit, so its next advertisement
+    /// makes a fresh one.  After a connect failed, the object stayed
+    /// without matching while the unit advertised, and BlueZ never dropped
+    /// it, since scans kept coming (2026-10-16).  Only an object that is
+    /// not connected, paired or trusted goes; what it held is logged.
+    async fn clear_stale(&mut self, limit: Duration) -> Result<(), BleError> {
+        let device = self.adapter.device(self.address)?;
+        // An error here means there is no object, which is fine.
+        let Ok(Some(state)) =
+            bounded(limit, "inspecting the unit's object", stale_state(&device)).await
+        else {
+            return Ok(());
+        };
+        bounded(
+            limit,
+            "removing the stale object",
+            self.adapter.remove_device(self.address),
+        )
+        .await?;
+        self.misses = 0;
+        info!(
+            "removed BlueZ's object for {} after {STALE_AFTER_MISSES} searches missed the unit; it held {state}",
             self.address
         );
         Ok(())
@@ -328,7 +361,7 @@ impl Unit {
             Ok(connection) => Ok(connection),
             Err(error) => {
                 // The setup error matters more than a failed cleanup.
-                disconnect(device, limit).await;
+                cancel(device, limit).await;
                 Err(error)
             }
         }
@@ -348,6 +381,9 @@ impl Connector for Unit {
             return self.open_or_disconnect(&device, limit).await;
         }
         self.clear_impostor(limit).await?;
+        if self.misses >= STALE_AFTER_MISSES {
+            self.clear_stale(limit).await?;
+        }
         // Only objects for addresses starting with the unit's are created,
         // which keeps other devices' advertisements out of BlueZ.
         let filter = self.adapter.set_discovery_filter(DiscoveryFilter {
@@ -369,7 +405,16 @@ impl Connector for Unit {
             );
             timeout(limit, self.find(&mut discovery)).await
         };
-        let device = found.map_err(|_| BleError::NotFound)??;
+        let device = match found.unwrap_or(Err(BleError::NotFound)) {
+            Ok(device) => device,
+            Err(error) => {
+                if matches!(error, BleError::NotFound) {
+                    self.misses += 1;
+                }
+                return Err(error);
+            }
+        };
+        self.misses = 0;
         self.open_or_disconnect(&device, limit).await
     }
 
@@ -503,6 +548,33 @@ async fn is_impostor(device: &Device) -> bluer::Result<bool> {
             .is_none_or(|data| data.is_empty()))
 }
 
+/// What a disconnected, unpaired, untrusted object holds, for the log;
+/// `None` for any other.
+async fn stale_state(device: &Device) -> bluer::Result<Option<String>> {
+    if device.is_connected().await? || device.is_paired().await? || device.is_trusted().await? {
+        return Ok(None);
+    }
+    let present = |has: bool| if has { "present" } else { "none" };
+    let rssi = device
+        .rssi()
+        .await?
+        .map_or_else(|| "none".to_owned(), |rssi| format!("{rssi} dBm"));
+    let service = device
+        .service_data()
+        .await?
+        .is_some_and(|data| !data.is_empty());
+    let manufacturer = device
+        .manufacturer_data()
+        .await?
+        .is_some_and(|data| !data.is_empty());
+    Ok(Some(format!(
+        "a {:?} address, RSSI {rssi}, service data {}, manufacturer data {}",
+        device.address_type().await?,
+        present(service),
+        present(manufacturer)
+    )))
+}
+
 /// Whether BlueZ shows `device` connected; an unanswered or failed query
 /// counts as no.
 async fn is_connected(device: &Device, limit: Duration) -> bool {
@@ -519,6 +591,18 @@ async fn disconnect(device: &Device, limit: Duration) {
     }
     if let Err(error) = bounded(limit, "disconnecting", device.disconnect()).await {
         warn!("disconnecting {}: {error}", device.address());
+    }
+}
+
+/// Ends a connection attempt that failed.  BlueZ goes on with a
+/// `Connect` the caller stopped waiting for, and while it does, refuses
+/// every other connection on the adapter with "Operation already in
+/// progress"; a disconnect cancels it.  The device is not connected, so
+/// [`disconnect`], which checks first, would skip it.  Nothing to end is
+/// the usual failure, so failures are only logged at debug level.
+async fn cancel(device: &Device, limit: Duration) {
+    if let Err(error) = bounded(limit, "cancelling the connection", device.disconnect()).await {
+        debug!("cancelling the connection to {}: {error}", device.address());
     }
 }
 
