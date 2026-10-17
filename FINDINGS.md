@@ -486,6 +486,16 @@ first connect after a restart.  The kernel ends an LE connect by itself
 after 20 s; a connect now waits for BlueZ's answer, bounded at 60 s
 only against a call that never returns.
 
+That did not help either (0.2.5): a connect waited 41 s and BlueZ
+failed it (`le-connection-abort-by-local`), and the unit went unfound
+the same way, flashing.  `Discovering` stayed true through 60
+half-second samples, across moments when no client of ours was
+searching.  Turning the adapter off and on (`Powered`, user-run) cleared
+it: all three units connected within 7 s and `Discovering` read false.
+A unit that goes unfound three times after a failed connect now has the
+adapter power-cycled, at most once per 10 minutes; the new session
+after six failures is gone.
+
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
 
 The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer

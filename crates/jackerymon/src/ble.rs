@@ -8,6 +8,7 @@ use std::num::NonZeroU8;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::time::Duration;
+use std::time::Instant;
 
 use bluer::Adapter;
 use bluer::AdapterEvent;
@@ -29,6 +30,7 @@ use log::info;
 use log::warn;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::time::sleep;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -61,6 +63,15 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// scanning while bluetoothd reported discovery on, so no unit was found
 /// again until the daemon stopped (`FINDINGS.md`, 2026-10-16).
 const CONNECT_LIMIT: Duration = Duration::from_secs(60);
+/// Searches in a row that miss the unit, after a failed connect to it,
+/// before the adapter is power-cycled; see [`Unit::reset_adapter`].
+const RESET_AFTER_MISSES: u32 = 3;
+/// Least time between adapter power cycles.
+const RESET_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// How long the adapter stays off in a power cycle.
+const POWER_OFF_PAUSE: Duration = Duration::from_secs(2);
+/// When this process last power-cycled the adapter.
+static LAST_RESET: Mutex<Option<Instant>> = Mutex::const_new(None);
 /// Searches in a row that miss the unit before its BlueZ object is
 /// removed; see [`Unit::clear_stale`].
 const STALE_AFTER_MISSES: u32 = 3;
@@ -151,6 +162,7 @@ pub async fn poll(
         address,
         key_file,
         misses: 0,
+        failed_connect: false,
     };
     poll_with(unit, config, commands, stop, on_event).await
 }
@@ -240,6 +252,9 @@ struct Unit {
     key_file: KeyFile,
     /// Searches in a row that did not find the unit.
     misses: u32,
+    /// Whether the last connect found the unit and then failed, after
+    /// which the controller can stop scanning; see [`Unit::reset_adapter`].
+    failed_connect: bool,
 }
 
 impl Unit {
@@ -272,6 +287,43 @@ impl Unit {
             self.address
         );
         Ok(())
+    }
+
+    /// Turns the adapter off and on, when the unit has gone unfound after
+    /// a connect to it failed.  A failed LE connect, with another unit
+    /// connected, left the controller not scanning while bluetoothd
+    /// reported discovery on, so nothing new was found until Bluetooth
+    /// restarted; a power cycle cleared it (2026-10-16).  Every connection
+    /// on the adapter drops, so this happens at most once per
+    /// [`RESET_INTERVAL`] in the process; a unit that is simply away never
+    /// gets as far as a failed connect.
+    async fn reset_adapter(&mut self, limit: Duration) -> Result<(), BleError> {
+        self.failed_connect = false;
+        self.misses = 0;
+        {
+            let mut last = LAST_RESET.lock().await;
+            if last.is_some_and(|at| at.elapsed() < RESET_INTERVAL) {
+                return Ok(());
+            }
+            *last = Some(Instant::now());
+        }
+        warn!(
+            "power-cycling the Bluetooth adapter: {} went unfound after a failed connect, when the controller can stop scanning",
+            self.address
+        );
+        bounded(
+            limit,
+            "turning the adapter off",
+            self.adapter.set_powered(false),
+        )
+        .await?;
+        sleep(POWER_OFF_PAUSE).await;
+        bounded(
+            limit,
+            "turning the adapter on",
+            self.adapter.set_powered(true),
+        )
+        .await
     }
 
     /// Removes BlueZ's object for the unit, so its next advertisement
@@ -397,6 +449,9 @@ impl Connector for Unit {
         if self.misses >= STALE_AFTER_MISSES {
             self.clear_stale(limit).await?;
         }
+        if self.failed_connect && self.misses >= RESET_AFTER_MISSES {
+            self.reset_adapter(limit).await?;
+        }
         // Only objects for addresses starting with the unit's are created,
         // which keeps other devices' advertisements out of BlueZ.
         let filter = self.adapter.set_discovery_filter(DiscoveryFilter {
@@ -428,7 +483,9 @@ impl Connector for Unit {
             }
         };
         self.misses = 0;
-        self.open_or_disconnect(&device, limit).await
+        let opened = self.open_or_disconnect(&device, limit).await;
+        self.failed_connect = opened.is_err();
+        opened
     }
 
     async fn abandon(&mut self, limit: Duration) {

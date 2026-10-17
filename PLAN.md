@@ -43,10 +43,7 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   LE connection at a time per adapter and fails another with
   "Operation already in progress", which two units retrying in step
   never got past.  A unit whose polling fails, or that another process
-  holds, tries again after 5 s without touching the others; so does
-  one after six transport failures in a row, with a new BlueZ session,
-  since bluetoothd drops a stuck connect only with its client's
-  session.  A key
+  holds, tries again after 5 s without touching the others.  A key
   that does not load is reported and left out.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty
   random-type advertisement can take over its BlueZ object and hide it
@@ -58,9 +55,11 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   object holding the unit's address; scan LE only with a discovery
   pattern of that address, so BlueZ makes no objects for other devices;
   accept only a unit with an RSSI, meaning heard during this scan.
-  A connect waits for BlueZ's answer (the kernel gives up after 20 s);
-  cutting it short at the query limit left the controller not scanning
-  while bluetoothd reported discovery on.
+  A connect waits for BlueZ's answer (the kernel gives up after 20 s).
+  A failed LE connect, with another unit connected, can leave the
+  controller not scanning while bluetoothd reports discovery on; when a
+  unit then goes unfound three times, the adapter is power-cycled, at
+  most once per 10 minutes.  Every unit drops and reconnects.
   After three searches in a row miss the unit, remove its object if it
   is not connected, paired or trusted, logging what it held.  A failed
   connect is cancelled: BlueZ goes on with a `Connect` nobody waits
