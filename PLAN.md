@@ -144,9 +144,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   read-only routes under `/units/<serial>/` unless `--tcp-control`,
   every unit's metrics at `/metrics`, the units with their latest
   readings at `/units`, and the overview at `/`.  The overview's
-  charts read each unit's `/series` for the window; the totals add up
-  units' readings interval by interval, and its live total counts only
-  units with a fresh reading.  A daemon refuses to start while
+  charts read each unit's `/series` for the window; output and input
+  are stacked, a band per unit from zero, adding up units' readings
+  interval by interval, with each unit's own value in the legend; the
+  table's live total counts only units with a fresh reading.  A daemon refuses to start while
   another answers on its socket, and replaces a dead one's leftover.
   Optional `--log-dir` writes daily JSON-lines files, in a directory
   per unit.  Readings older than 60 s are left out of `/metrics`.  A

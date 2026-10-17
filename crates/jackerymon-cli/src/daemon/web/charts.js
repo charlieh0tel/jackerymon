@@ -58,7 +58,9 @@ function clearCharts(why, bad = false) {
   if (!bad) $("charts").innerHTML = `<span class="muted">${esc(why)}</span>`;
 }
 
-function chart(title, data, series, axes, scales = {}) {
+// A chart in the charts panel; `extra` is merged into uPlot's options,
+// as stacked bands need.
+function chart(title, data, series, axes, scales = {}, extra = {}) {
   const el = document.createElement("div");
   $("charts").appendChild(el);
   const right = axes.some((axis) => axis.side === 1);
@@ -76,6 +78,7 @@ function chart(title, data, series, axes, scales = {}) {
       series: [{}, ...series],
       axes: [{ stroke: AXIS_DIM, grid: { stroke: "#2b3038" } }, ...axes],
       scales: { x: { time: true }, ...scales },
+      ...extra,
     },
     data,
     el,

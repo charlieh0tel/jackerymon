@@ -58,20 +58,26 @@ test("the overview lists each unit with its reading, and the live total", async 
   await expect(page.locator("#colophon")).toContainText("Jackery units");
 });
 
-test("the overview charts charge, all units together, and each unit", async ({ page }) => {
+test("the overview charts charge, power stacked, and each unit", async ({ page }) => {
   const fake = new Fake();
   fake.root = "overview.html";
   fake.units.push({ serial: "987654321", name: "shed", model: 14, model_name: "Explorer 3000", link: { state: "connected" } });
+  const { output_watts: output } = fake.series;
+  output[0] = 120;
   await open(page, fake);
-  await expect(page.locator("#charts .uplot")).toHaveCount(4);
+  await expect(page.locator("#charts .uplot")).toHaveCount(5);
   await expect(page.locator("#charts .u-title")).toHaveText([
     "Charge",
-    "All units",
+    "Output, stacked",
+    "Input, stacked",
     "Explorer 2000 v2 855125071405677",
     "shed Explorer 3000 987654321",
   ]);
   // Every unit's series are read for the same window.
   expect(fake.seen.series).toBe(2);
+  // Both units read the same, so the second band tops out at twice the first.
+  const bands = await page.evaluate(() => charts[1].data.slice(1).map((column) => column[0]));
+  expect(bands).toEqual([120, 240]);
 });
 
 test("a unit page links back to the overview", async ({ page }) => {

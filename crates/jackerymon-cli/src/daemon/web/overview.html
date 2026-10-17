@@ -36,8 +36,8 @@
 "use strict";
 
 // Every unit the daemon serves: a live table, then charts over the
-// chosen window of each unit's charge, the input and output of them all
-// together, and each unit's power.  Each unit's own page has the rest.
+// chosen window of each unit's charge, every unit's output and input
+// stacked, and each unit's power.  Each unit's own page has the rest.
 
 // One color per unit, in the order /units lists them, round again past
 // the last.
@@ -111,12 +111,49 @@ function joined(series, column) {
   return uPlot.join(series.map((s) => [s.time, s[column]]));
 }
 
-// The sum of a row's values, null when none has one.
-function rowSums(table) {
-  return table[0].map((_, i) => {
-    const present = table.slice(1).map((values) => values[i]).filter((v) => v != null);
-    return present.length ? present.reduce((sum, v) => sum + v, 0) : null;
+// Opacity of a stacked band's fill, as two hex digits after its color.
+const BAND_ALPHA = "66";
+// Room above the stack's top, as a share of it, as uPlot pads a range.
+const STACK_HEADROOM = 0.1;
+
+// Each unit's column as the running total of it and those before it,
+// so the top one is the total.  A unit with no value in a row adds
+// nothing to it; a row no unit has a value in stays a gap.
+function stacked(table) {
+  const [time, ...columns] = table;
+  const any = time.map((_, i) => columns.some((values) => values[i] != null));
+  let running = time.map(() => 0);
+  const totals = columns.map((values) => {
+    running = running.map((sum, i) => sum + (values[i] ?? 0));
+    return running.map((sum, i) => (any[i] ? sum : null));
   });
+  return [time, ...totals];
+}
+
+// A chart of `column` from every unit, stacked: a band per unit in its
+// color, between its running total and the one below, and the unit's
+// own value in the legend.
+function stackChart(title, listed, series, column) {
+  const table = joined(series, column);
+  const totals = stacked(table);
+  return chart(
+    title,
+    totals,
+    listed.map((u, i) => ({
+      label: `${unitLabel(u)} W`,
+      stroke: unitColor(i),
+      scale: "W",
+      // The first band reaches down to zero.
+      ...(i === 0 ? { fill: unitColor(i) + BAND_ALPHA } : {}),
+      value: (_, total, __, row) => (row == null || table[i + 1][row] == null ? MISSING : `${table[i + 1][row]} W`),
+    })),
+    [yAxis("W")],
+    // From zero, so each band's height is its unit's share.
+    { W: { range: (_, __, max) => uPlot.rangeNum(0, max, STACK_HEADROOM, true) } },
+    {
+      bands: listed.slice(1).map((_, i) => ({ series: [i + 2, i + 1], fill: unitColor(i + 1) + BAND_ALPHA })),
+    },
+  );
 }
 
 async function load(signal) {
@@ -145,13 +182,6 @@ async function load(signal) {
   const [percent] = aligned([
     { ...extent(charge.slice(1).flat(), PERCENT_STEP), ceiling: FULL },
   ]);
-  const input = joined(series, "input_watts");
-  const output = joined(series, "output_watts");
-  // Input and output share a time axis for the totals.
-  const power = uPlot.join([
-    [input[0], rowSums(input)],
-    [output[0], rowSums(output)],
-  ]);
   charts = [
     chart(
       "Charge",
@@ -160,15 +190,8 @@ async function load(signal) {
       [yAxis("%", AXIS_DIM, percent)],
       { "%": alignedScale(percent) },
     ),
-    chart(
-      "All units",
-      power,
-      [
-        { label: "input W", stroke: INPUT, scale: "W" },
-        { label: "output W", stroke: OUTPUT, scale: "W" },
-      ],
-      [yAxis("W")],
-    ),
+    stackChart("Output, stacked", listed, series, "output_watts"),
+    stackChart("Input, stacked", listed, series, "input_watts"),
     ...listed.map((u, i) =>
       chart(
         unitLabel(u),
