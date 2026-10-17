@@ -16,6 +16,7 @@ const FILES = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8"],
   "/common.js": ["common.js", "text/javascript; charset=utf-8"],
+  "/charts.js": ["charts.js", "text/javascript; charset=utf-8"],
 };
 const UPLOT = join(here, "node_modules", "uplot", "dist");
 

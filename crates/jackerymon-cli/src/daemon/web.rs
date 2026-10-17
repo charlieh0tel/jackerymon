@@ -28,6 +28,7 @@ use crate::text::timer_text;
 pub(super) const INDEX: &str = include_str!("web/index.html");
 pub(super) const STYLE: &str = include_str!("web/style.css");
 pub(super) const COMMON: &str = include_str!("web/common.js");
+pub(super) const CHARTS: &str = include_str!("web/charts.js");
 
 /// Most points a series returns; `every` is raised to keep under it.
 const MAX_POINTS: i64 = 5_000;

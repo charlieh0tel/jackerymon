@@ -168,7 +168,8 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   each number carries its unit, in its line's color.  A right axis takes the left's
   number of divisions, each a round step, so its ticks fall on the
   left's gridlines.  Same
-  look, `common.js` lifecycle, and uPlot 1.6.32 from jsdelivr as
+  look, `common.js` lifecycle (charts in `charts.js`), and uPlot 1.6.32
+  from jsdelivr as
   smartclock-web; served by the daemon rather than a separate process,
   at each unit's address, and reads relative to it, so the same files
   work over TCP and a unit's socket.  `/series` averages samples into

@@ -798,6 +798,7 @@ mod tests {
                     ("/", "text/html"),
                     ("/style.css", "text/css"),
                     ("/common.js", "text/javascript"),
+                    ("/charts.js", "text/javascript"),
                 ] {
                     let page = reqwest::get(format!("{base}{path}")).await.expect("page");
                     let content_type = page.headers()[reqwest::header::CONTENT_TYPE]

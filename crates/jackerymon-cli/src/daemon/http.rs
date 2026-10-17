@@ -93,6 +93,10 @@ fn unit_routes(prefix: &str, unit: Arc<Unit>, control: bool) -> Router {
         .route(
             &format!("{prefix}/common.js"),
             get(|| async { page(JS_CONTENT_TYPE, web::COMMON) }),
+        )
+        .route(
+            &format!("{prefix}/charts.js"),
+            get(|| async { page(JS_CONTENT_TYPE, web::CHARTS) }),
         );
     let routes = if control {
         reads.route(&format!("{prefix}/settings"), post(settings))
