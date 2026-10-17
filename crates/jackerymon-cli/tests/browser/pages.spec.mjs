@@ -76,8 +76,11 @@ test("the overview charts charge, power stacked, and each unit", async ({ page }
   // Every unit's series are read for the same window.
   expect(fake.seen.series).toBe(2);
   // Both units read the same, so the second band tops out at twice the first.
+  // The last line is the total again, for the legend.
   const bands = await page.evaluate(() => charts[1].data.slice(1).map((column) => column[0]));
-  expect(bands).toEqual([120, 240]);
+  expect(bands).toEqual([120, 240, 240]);
+  const labels = await page.evaluate(() => charts[1].series.slice(1).map((series) => series.label));
+  expect(labels.at(-1)).toBe("total W");
 });
 
 test("a unit page links back to the overview", async ({ page }) => {

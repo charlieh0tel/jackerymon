@@ -113,6 +113,8 @@ function joined(series, column) {
 
 // Opacity of a stacked band's fill, as two hex digits after its color.
 const BAND_ALPHA = "66";
+// The total's line along the top of a stack, in the text color.
+const STACK_TOTAL = "#e6e8eb";
 // Room above the stack's top, as a share of it, as uPlot pads a range.
 const STACK_HEADROOM = 0.1;
 
@@ -131,14 +133,15 @@ function stacked(table) {
 }
 
 // A chart of `column` from every unit, stacked: a band per unit in its
-// color, between its running total and the one below, and the unit's
-// own value in the legend.
+// color, between its running total and the one below, the unit's own
+// value in the legend, and the total last.
 function stackChart(title, listed, series, column) {
   const table = joined(series, column);
   const totals = stacked(table);
   return chart(
     title,
-    totals,
+    // The top of the stack again, as the total.
+    [...totals, totals[totals.length - 1]],
     listed.map((u, i) => ({
       label: `${unitLabel(u)} W`,
       stroke: unitColor(i),
@@ -146,7 +149,13 @@ function stackChart(title, listed, series, column) {
       // The first band reaches down to zero.
       ...(i === 0 ? { fill: unitColor(i) + BAND_ALPHA } : {}),
       value: (_, total, __, row) => (row == null || table[i + 1][row] == null ? MISSING : `${table[i + 1][row]} W`),
-    })),
+    })).concat({
+      label: "total W",
+      stroke: STACK_TOTAL,
+      width: TOTAL_WIDTH,
+      scale: "W",
+      value: (_, total) => unitText(total, "W"),
+    }),
     [yAxis("W")],
     // From zero, so each band's height is its unit's share.
     { W: { range: (_, __, max) => uPlot.rangeNum(0, max, STACK_HEADROOM, true) } },
