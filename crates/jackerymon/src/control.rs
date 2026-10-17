@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::frame::Action;
 use crate::frame::MessageType;
 use crate::frame::Request;
+use crate::identity::ModelCode;
 use crate::status::BatteryProtection;
 use crate::status::ChargeSpeed;
 use crate::status::LightMode;
@@ -55,9 +56,21 @@ pub enum ControlError {
     NotApplied(Setting),
     #[error("connection failed while applying {setting}: {error}")]
     Transport { setting: Setting, error: String },
+    /// Never sent: the unit's model has no such control.
+    #[error("{setting}: model {model} has no such control")]
+    Unavailable { setting: Setting, model: ModelCode },
 }
 
 impl Setting {
+    /// Whether `model` has the control this setting changes.
+    #[must_use]
+    pub fn available_on(self, model: ModelCode) -> bool {
+        match self {
+            Self::Light(_) => model.has_light(),
+            _ => true,
+        }
+    }
+
     /// Why this setting needs the user's confirmation, if it does.  Kept
     /// short enough for one line of the TUI menu.
     #[must_use]

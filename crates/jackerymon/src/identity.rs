@@ -85,6 +85,14 @@ impl ModelCode {
         }
     }
 
+    /// Whether the model has a light.  The Explorer 3000 has none: it
+    /// acknowledges a light setting and ignores it, and the app hides its
+    /// light control (`rb/j`).
+    #[must_use]
+    pub fn has_light(self) -> bool {
+        self != Self::EXPLORER_3000
+    }
+
     /// [`Self::SUPPORTED`], for messages.
     #[must_use]
     pub fn supported_list() -> String {

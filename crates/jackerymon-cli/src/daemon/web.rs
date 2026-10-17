@@ -7,6 +7,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::DateTime;
 use chrono::Utc;
+use jackerymon::identity::ModelCode;
 use jackerymon::status::Status;
 use jackerymon::status::TemperatureAlarm;
 use serde::Serialize;
@@ -63,8 +64,10 @@ pub(super) struct View {
     temperature_alarm: Option<String>,
 }
 
-impl From<&Status> for View {
-    fn from(status: &Status) -> Self {
+impl View {
+    /// `status` as the page shows it for a unit of `model`, leaving out
+    /// a control the model does not have.
+    pub(super) fn new(status: &Status, model: ModelCode) -> Self {
         Self {
             battery_percent: status.battery_percent,
             battery_celsius: status.battery_celsius,
@@ -85,7 +88,10 @@ impl From<&Status> for View {
             dc_output: status.dc_output.map(on_off),
             usb_output: status.usb_output.map(on_off),
             car_output: status.car_output.map(on_off),
-            light: status.light_mode.map(light_text),
+            light: status
+                .light_mode
+                .filter(|_| model.has_light())
+                .map(light_text),
             screen: status.screen.map(screen_text),
             auto_off: status.auto_off.map(timer_text),
             energy_saving: status.energy_saving.map(timer_text),

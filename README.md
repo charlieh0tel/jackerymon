@@ -14,7 +14,7 @@ cargo test
 ## Hardware
 
 Tested: two Explorer 2000 v2s (app model code 12) and an Explorer 3000
-(14), all advertising as `HT`, polled at once by one daemon, from a
+(14, which has no light), all advertising as `HT`, polled at once by one daemon, from a
 laptop with an Intel Bluetooth controller, Ubuntu 25.04, Linux 6.14,
 and BlueZ 5.79.
 

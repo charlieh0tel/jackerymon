@@ -216,7 +216,11 @@ async fn status(State(unit): State<Arc<Unit>>) -> Json<Value> {
         "author": author(),
         "license": env!("CARGO_PKG_LICENSE"),
         "repository": env!("CARGO_PKG_REPOSITORY"),
-        "view": snapshot.latest.as_ref().and_then(|latest| latest.status.as_ref()).map(View::from),
+        "view": snapshot
+            .latest
+            .as_ref()
+            .and_then(|latest| latest.status.as_ref())
+            .map(|status| View::new(status, unit.model)),
         "latest": snapshot.latest.map(|latest| latest.record),
     }))
 }
@@ -382,9 +386,9 @@ async fn settings(
         Ok(Some(Ok(()))) => Json(json!({ "applied": setting.to_string() })).into_response(),
         Ok(Some(Err(control))) => {
             let code = match control {
-                ControlError::Rejected { .. } | ControlError::NotApplied(_) => {
-                    StatusCode::UNPROCESSABLE_ENTITY
-                }
+                ControlError::Rejected { .. }
+                | ControlError::NotApplied(_)
+                | ControlError::Unavailable { .. } => StatusCode::UNPROCESSABLE_ENTITY,
                 ControlError::Transport { .. } => StatusCode::SERVICE_UNAVAILABLE,
             };
             error(code, &control.to_string())

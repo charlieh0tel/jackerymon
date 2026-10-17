@@ -39,6 +39,7 @@ use crate::frame::RawStatus;
 use crate::frame::Request;
 use crate::frame::ResponseDecoder;
 use crate::identity::BleKey;
+use crate::identity::ModelCode;
 use crate::key_file::KeyFile;
 use crate::poll::Commands;
 use crate::poll::Connector;
@@ -370,6 +371,10 @@ impl Unit {
 
 impl Connector for Unit {
     type Link = Connection;
+
+    fn model(&self) -> ModelCode {
+        self.key_file.model
+    }
 
     async fn connect(&mut self, limit: Duration) -> Result<Connection, BleError> {
         let _turn = CONNECTING.lock().await;

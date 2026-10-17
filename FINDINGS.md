@@ -470,7 +470,10 @@ logging its state, after three searches in a row miss it.
 The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer
 2000's status request with the same keys plus `dt` (10), `en` (0) and
 `uo` (-25200, the UTC offset in seconds for PDT).  Its `ot` read 96.1
-h, below the ceiling the 2000 sits at.
+h, below the ceiling the 2000 sits at.  It has no light: it
+acknowledged `lm=2` and kept reporting `lm` 0, and the app hides its
+whole light control (`rb/j` `t()` false; `y0()` false also hides the
+low setting).  Its option lists are otherwise the 2000's.
 
 The HomePower 3000 (model 19, "HP3000"; advertised battery 90,
 bind counter 1) connects and takes the request write, but sends no

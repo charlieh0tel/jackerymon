@@ -4,6 +4,7 @@
 use crossterm::event::KeyCode;
 use jackerymon::control::OFF_TIMER_CHOICES;
 use jackerymon::control::Setting;
+use jackerymon::identity::ModelCode;
 use jackerymon::status::BatteryProtection;
 use jackerymon::status::ChargeSpeed;
 use jackerymon::status::LightMode;
@@ -26,9 +27,10 @@ impl Control {
     }
 }
 
-pub(super) fn controls() -> Vec<Control> {
+/// The controls for a unit of `model`, all of them when it is not known.
+pub(super) fn controls(model: Option<ModelCode>) -> Vec<Control> {
     let switch = |setting: fn(bool) -> Setting| vec![setting(true), setting(false)];
-    vec![
+    let all = vec![
         Control {
             label: "AC output",
             choices: switch(Setting::AcOutput),
@@ -82,7 +84,18 @@ pub(super) fn controls() -> Vec<Control> {
             label: "UPS",
             choices: switch(Setting::Ups),
         },
-    ]
+    ];
+    // A control is left out when none of its choices is on the model.
+    all.into_iter()
+        .filter(|control| {
+            model.is_none_or(|model| {
+                control
+                    .choices
+                    .iter()
+                    .any(|choice| choice.available_on(model))
+            })
+        })
+        .collect()
 }
 
 /// Where the user is in the menu.
@@ -198,6 +211,7 @@ fn next(index: usize, count: usize) -> usize {
 mod tests {
     use crossterm::event::KeyCode;
     use jackerymon::control::Setting;
+    use jackerymon::identity::ModelCode;
     use jackerymon::status::LightMode;
     use jackerymon::status::Status;
     use serde_json::json;
@@ -206,17 +220,30 @@ mod tests {
     use super::controls;
 
     fn press(menu: &mut Menu, keys: &[KeyCode], status: Option<&Status>) -> Option<Setting> {
-        let controls = controls();
+        let controls = controls(None);
         keys.iter()
             .filter_map(|key| menu.handle(*key, &controls, status))
             .last()
     }
 
     fn row_of(setting: Setting) -> usize {
-        controls()
+        controls(None)
             .iter()
             .position(|control| control.choices.contains(&setting))
             .expect("row")
+    }
+
+    #[test]
+    fn a_model_without_a_light_gets_no_light_control() {
+        let labels = |model| {
+            controls(model)
+                .iter()
+                .map(|control| control.label)
+                .collect::<Vec<_>>()
+        };
+        assert!(labels(Some(ModelCode::EXPLORER_2000)).contains(&"Light"));
+        assert!(!labels(Some(ModelCode::EXPLORER_3000)).contains(&"Light"));
+        assert_eq!(labels(None), labels(Some(ModelCode::EXPLORER_2000)));
     }
 
     #[test]
@@ -285,7 +312,7 @@ mod tests {
         assert_eq!(
             menu,
             Menu::Open {
-                row: controls().len() - 1,
+                row: controls(None).len() - 1,
                 choice: None
             }
         );

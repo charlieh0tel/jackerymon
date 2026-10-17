@@ -82,7 +82,11 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Control scope.**  AC/DC outputs, light, screen, auto-off and
   energy-saving timers, charge speed, battery protection, emergency
   charge, and UPS mode.  Reboot and power-off cannot be sent.  No custom
-  charge power: model 12 acknowledges it without applying it.
+  charge power: model 12 acknowledges it without applying it.  A
+  setting for a control the model lacks is refused before it is sent,
+  and the TUI menu and the web view leave that control out: the
+  Explorer 3000 has no light, and acknowledges a light setting it then
+  ignores.
 - **Confirmation only for turning emergency charging on.**  Jackery
   reserves it for emergencies.  Outputs need no confirmation.
 

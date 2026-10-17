@@ -23,6 +23,7 @@ use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use futures::StreamExt;
 use jackerymon::control::Setting;
+use jackerymon::identity::ModelCode;
 use ratatui::DefaultTerminal;
 use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
@@ -66,6 +67,7 @@ pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
         &mut monitor,
         &mut source.updates,
         &source.commands,
+        source.model,
     )
     .await;
     ratatui::restore();
@@ -82,8 +84,9 @@ async fn show(
     monitor: &mut Monitor,
     events: &mut mpsc::UnboundedReceiver<Update>,
     commands: &mpsc::Sender<Command>,
+    model: Option<ModelCode>,
 ) -> Result<()> {
-    let controls = controls();
+    let controls = controls(model);
     let mut menu = Menu::Closed;
     let mut in_progress: InProgress = None;
     let mut keys = EventStream::new();

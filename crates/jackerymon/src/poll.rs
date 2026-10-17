@@ -29,6 +29,7 @@ use crate::control::Setting;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
 use crate::frame::Request;
+use crate::identity::ModelCode;
 use crate::status::Status;
 
 /// Status reads that may confirm a setting; the unit can apply it a
@@ -107,6 +108,9 @@ pub(crate) trait Connector {
 
     async fn connect(&mut self, timeout: Duration) -> Result<Self::Link, BleError>;
 
+    /// The unit's model, which decides the settings it takes.
+    fn model(&self) -> ModelCode;
+
     /// Closes whatever a `connect` cancelled partway may have left open.
     async fn abandon(&mut self, timeout: Duration);
 }
@@ -181,6 +185,7 @@ async fn poll_loop<C: Connector>(
 ) -> Result<(), PollError> {
     let mut stop = pin!(stop);
     let mut counters = Counters::default();
+    let model = connector.model();
     loop {
         let connected = tokio::select! {
             () = &mut stop => None,
@@ -201,7 +206,7 @@ async fn poll_loop<C: Connector>(
                     ControlFlow::Continue(()) => {
                         tokio::select! {
                             () = &mut stop => Ok(ControlFlow::Break(())),
-                            outcome = serve(&mut link, config, commands, &mut counters, on_event, unverified) => outcome,
+                            outcome = serve(&mut link, config, model, commands, &mut counters, on_event, unverified) => outcome,
                         }
                     }
                 };
@@ -245,6 +250,7 @@ async fn poll_loop<C: Connector>(
 async fn serve<L: Link>(
     link: &mut L,
     config: PollConfig,
+    model: ModelCode,
     commands: &mut Commands,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
@@ -273,6 +279,11 @@ async fn serve<L: Link>(
                     break;
                 }
                 Some(request) = next_command(commands) => {
+                    let setting = request.setting;
+                    if !setting.available_on(model) {
+                        answer(request.reply, Err(ControlError::Unavailable { setting, model }));
+                        continue;
+                    }
                     if apply(link, config, request, counters, on_event, unverified).await?.is_break() {
                         return Ok(ControlFlow::Break(()));
                     }
@@ -398,6 +409,7 @@ mod tests {
     use crate::frame::DecodeError;
     use crate::frame::RawStatus;
     use crate::frame::Request;
+    use crate::identity::ModelCode;
     use crate::status::LightMode;
 
     const LIMIT: NonZeroU32 = NonZeroU32::new(3).expect("nonzero");
@@ -429,6 +441,8 @@ mod tests {
         connects: Rc<RefCell<u32>>,
         closed: Rc<RefCell<u32>>,
         abandoned: Rc<RefCell<u32>>,
+        /// The Explorer 2000 when `None`.
+        model: Option<ModelCode>,
     }
 
     /// A scripted link: answers from the shared script.
@@ -439,6 +453,10 @@ mod tests {
 
     impl Connector for Script {
         type Link = FakeLink;
+
+        fn model(&self) -> ModelCode {
+            self.model.unwrap_or(ModelCode::EXPLORER_2000)
+        }
 
         async fn connect(&mut self, _timeout: Duration) -> Result<FakeLink, BleError> {
             *self.connects.borrow_mut() += 1;
@@ -673,7 +691,20 @@ mod tests {
         setting: Setting,
         samples: u64,
     ) -> (Result<(), ControlError>, Vec<u8>, Result<(), PollError>) {
-        let script = Script::default();
+        control_on(ModelCode::EXPLORER_2000, steps, setting, samples).await
+    }
+
+    /// [`control`] for a unit of `model`.
+    async fn control_on(
+        model: ModelCode,
+        steps: Vec<Step>,
+        setting: Setting,
+        samples: u64,
+    ) -> (Result<(), ControlError>, Vec<u8>, Result<(), PollError>) {
+        let script = Script {
+            model: Some(model),
+            ..Script::default()
+        };
         script.steps.borrow_mut().extend(steps);
         let (sender, receiver) = mpsc::channel(1);
         let (reply, answer) = oneshot::channel();
@@ -708,6 +739,26 @@ mod tests {
         .await;
         assert_eq!(reply, Ok(()));
         assert_eq!(actions, [6, 17, 6, 6]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_control_the_model_lacks_is_refused_unsent() {
+        let (reply, actions, result) = control_on(
+            ModelCode::EXPLORER_3000,
+            vec![Step::Status(100), Step::Status(99)],
+            LIGHT,
+            2,
+        )
+        .await;
+        assert_eq!(
+            reply,
+            Err(ControlError::Unavailable {
+                setting: LIGHT,
+                model: ModelCode::EXPLORER_3000
+            })
+        );
+        assert_eq!(actions, [6, 6]);
         assert!(result.is_ok());
     }
 

@@ -9,6 +9,7 @@ use anyhow::Result;
 use chrono::Utc;
 use jackerymon::ble;
 use jackerymon::control::Setting;
+use jackerymon::identity::ModelCode;
 use jackerymon::poll::ControlRequest;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -34,6 +35,8 @@ pub(super) struct Command {
 /// A running source of updates and taker of settings.
 pub(super) struct Source {
     pub(super) serial: String,
+    /// `None` when a daemon does not say.
+    pub(super) model: Option<ModelCode>,
     pub(super) updates: mpsc::UnboundedReceiver<Update>,
     /// One setting at a time; the screen refuses another while one runs.
     pub(super) commands: mpsc::Sender<Command>,
@@ -55,6 +58,7 @@ impl Source {
 pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
     let (key_file, lock) = connection.claim(KeyHome::User)?;
     let serial = key_file.serial.to_string();
+    let model = Some(key_file.model);
     // A monitor keeps trying while the unit's radio is off.
     let config = connection.poll_config(None);
     let adapter = ble::default_adapter().await?;
@@ -104,6 +108,7 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
     });
     Ok(Source {
         serial,
+        model,
         updates,
         commands,
         stop,
@@ -116,6 +121,7 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
 /// Fails if the daemon owns a unit other than `expected`.
 pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Result<Source> {
     let (client, serial) = DaemonClient::connect(endpoint, expected).await?;
+    let model = client.model().await;
     let (sender, updates) = mpsc::unbounded_channel();
     // The chart's window of logged samples, so it opens full; the live
     // stream then replays the latest, which the monitor skips as a repeat.
@@ -165,6 +171,7 @@ pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Resul
     });
     Ok(Source {
         serial,
+        model,
         updates,
         commands,
         stop,

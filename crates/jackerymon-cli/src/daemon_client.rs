@@ -1,5 +1,6 @@
 //! A client for a running `jackerymon daemon`.
 
+use jackerymon::identity::ModelCode;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -164,6 +165,23 @@ impl DaemonClient {
             }
         }
         Ok(())
+    }
+
+    /// The model of the unit the daemon owns; `None` from a daemon that
+    /// does not say, or does not answer.
+    pub(crate) async fn model(&self) -> Option<ModelCode> {
+        let status: serde_json::Value = self
+            .client
+            .get(format!("{}/status", self.base))
+            .timeout(DAEMON_STATUS_TIMEOUT)
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        let code = u16::try_from(status["model"].as_u64()?).ok()?;
+        Some(ModelCode(code))
     }
 
     /// The serial of the unit the daemon owns.

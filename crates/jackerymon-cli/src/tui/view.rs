@@ -494,7 +494,7 @@ mod tests {
     fn render_with(monitor: &Monitor, menu: Menu, now: Instant) -> String {
         let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("terminal");
         terminal
-            .draw(|frame| draw(frame, monitor, menu, &controls(), now))
+            .draw(|frame| draw(frame, monitor, menu, &controls(None), now))
             .expect("draw");
         terminal
             .backend()
@@ -585,7 +585,7 @@ mod tests {
         ] {
             assert!(screen.contains(expected), "missing {expected:?}");
         }
-        let row = controls()
+        let row = controls(None)
             .iter()
             .position(|control| control.label == "Emergency charge")
             .expect("emergency charge row");
