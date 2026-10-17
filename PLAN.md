@@ -59,8 +59,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   A failed LE connect, with another unit connected, can leave the
   controller not scanning while bluetoothd reports discovery on; when a
   unit then goes unfound three times, the daemon power-cycles the
-  adapter if `--reset-adapter` is set, at most once per 10 minutes, and
-  otherwise says so in its log.  Off by default: every Bluetooth
+  adapter if `--reset-adapter` is set and a 5 s scan with no address
+  filter hears no other device advertise (a unit that left looks the
+  same otherwise), at most once per 10 minutes, and otherwise says so
+  in its log.  Off by default: every Bluetooth
   connection on the host drops.
   After three searches in a row miss the unit, remove its object if it
   is not connected, paired or trusted, logging what it held.  A failed

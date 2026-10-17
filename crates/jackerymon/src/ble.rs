@@ -66,6 +66,9 @@ const CONNECT_LIMIT: Duration = Duration::from_secs(60);
 /// Searches in a row that miss the unit, after a failed connect to it,
 /// before the adapter is power-cycled; see [`Unit::reset_adapter`].
 const RESET_AFTER_MISSES: u32 = 3;
+/// How long a scan listens for other devices before a power cycle; see
+/// [`Unit::hears_others`].
+const HEARING_PROBE: Duration = Duration::from_secs(5);
 /// Least time between adapter power cycles.
 const RESET_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// How long the adapter stays off in a power cycle.
@@ -303,6 +306,13 @@ impl Unit {
     async fn reset_adapter(&mut self, limit: Duration) -> Result<(), BleError> {
         self.failed_connect = false;
         self.misses = 0;
+        if self.hears_others(limit).await? {
+            info!(
+                "not power-cycling the Bluetooth adapter: it hears other devices, so {} is likely out of range",
+                self.address
+            );
+            return Ok(());
+        }
         {
             let mut last = LAST_RESET.lock().await;
             if last.is_some_and(|at| at.elapsed() < RESET_INTERVAL) {
@@ -327,6 +337,45 @@ impl Unit {
             self.adapter.set_powered(true),
         )
         .await
+    }
+
+    /// Whether a scan with no address filter hears any other device
+    /// advertise.  Stuck, the controller hears none; a unit that left
+    /// after a failed connect looks the same as a stuck controller
+    /// otherwise (2026-10-16).  A device counts once reported twice: a
+    /// scan starts by reporting every object BlueZ already has, with
+    /// signal strengths that can be stale, and only a fresh advertisement
+    /// reports it again.
+    async fn hears_others(&self, limit: Duration) -> Result<bool, BleError> {
+        let filter = self.adapter.set_discovery_filter(DiscoveryFilter {
+            transport: DiscoveryTransport::Le,
+            duplicate_data: true,
+            ..DiscoveryFilter::default()
+        });
+        bounded(limit, "setting the scan filter", filter).await?;
+        // Discovery stops when this stream is dropped.
+        let mut discovery = Box::pin(
+            bounded(
+                limit,
+                "starting the scan",
+                self.adapter.discover_devices_with_changes(),
+            )
+            .await?,
+        );
+        let mut seen = HashSet::new();
+        let heard = timeout(HEARING_PROBE, async {
+            while let Some(event) = discovery.next().await {
+                if let AdapterEvent::DeviceAdded(address) = event
+                    && address != self.address
+                    && !seen.insert(address)
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+        Ok(heard.unwrap_or(false))
     }
 
     /// Removes BlueZ's object for the unit, so its next advertisement

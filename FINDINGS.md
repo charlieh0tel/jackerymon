@@ -494,7 +494,14 @@ searching.  Turning the adapter off and on (`Powered`, user-run) cleared
 it: all three units connected within 7 s and `Discovering` read false.
 With `--reset-adapter`, a unit that goes unfound three times after a
 failed connect now has the adapter power-cycled, at most once per 10
-minutes; without it, the daemon logs the condition.  The new session
+minutes; without it, the daemon logs the condition.
+
+The first automatic power cycle (0.2.6) was a false alarm: a unit
+carried out of range was still heard faintly, its connect then failed,
+and it went unfound, which looks the same.  Before power-cycling, the
+daemon now listens 5 s with no address filter and leaves the adapter
+alone if any other device advertises; stuck, the controller heard
+none.  The new session
 after six failures is gone.
 
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
