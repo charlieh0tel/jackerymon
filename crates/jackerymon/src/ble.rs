@@ -54,6 +54,13 @@ const SERVICE: Uuid = bluetooth_uuid(0xbdee);
 /// Bound on BlueZ calls outside a connect attempt, such as finding the
 /// adapter; bluer's own D-Bus timeout is two minutes.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bound on a connect, which otherwise waits for BlueZ's answer: the
+/// kernel gives up on an LE connection by itself after 20 s, and BlueZ
+/// reports that.  This only guards against a call that never returns.
+/// Giving up sooner, at the 10 s query limit, left the controller not
+/// scanning while bluetoothd reported discovery on, so no unit was found
+/// again until the daemon stopped (`FINDINGS.md`, 2026-10-16).
+const CONNECT_LIMIT: Duration = Duration::from_secs(60);
 /// Searches in a row that miss the unit before its BlueZ object is
 /// removed; see [`Unit::clear_stale`].
 const STALE_AFTER_MISSES: u32 = 3;
@@ -323,7 +330,8 @@ impl Unit {
     async fn open(&self, device: &Device, limit: Duration) -> Result<Connection, BleError> {
         // Subscribe before connecting so no disconnect is missed.
         let events = Box::pin(bounded(limit, "watching the device", device.events()).await?);
-        bounded(limit, "connecting", device.connect()).await?;
+        // BlueZ's own answer, not `limit`: see `CONNECT_LIMIT`.
+        bounded(CONNECT_LIMIT, "connecting", device.connect()).await?;
         let services = bounded(limit, "discovering services", device.services()).await?;
         let (command, notify) = bounded(limit, "discovering characteristics", async {
             let mut command = None;

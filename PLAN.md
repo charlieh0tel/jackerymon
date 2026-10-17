@@ -58,6 +58,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   object holding the unit's address; scan LE only with a discovery
   pattern of that address, so BlueZ makes no objects for other devices;
   accept only a unit with an RSSI, meaning heard during this scan.
+  A connect waits for BlueZ's answer (the kernel gives up after 20 s);
+  cutting it short at the query limit left the controller not scanning
+  while bluetoothd reported discovery on.
   After three searches in a row miss the unit, remove its object if it
   is not connected, paired or trusted, logging what it held.  A failed
   connect is cancelled: BlueZ goes on with a `Connect` nobody waits

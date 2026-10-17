@@ -475,6 +475,17 @@ reported, most likely still trying the timed-out connect, which the
 sessions, had cleared it before; a unit's polling now ends after six
 failures in a row and starts again with a new session.
 
+That did not help.  With the 3000 stuck again (0.2.4), a 20-second
+privileged `btmon` capture held no advertising reports from any device
+and no scan commands, only the two connected units' data, while the
+adapter's `Discovering` property read true throughout: bluetoothd
+believed it was scanning and the controller was not, so every search,
+the daemon's or another process's, found nothing new.  Each time it
+began right after a connect timed out at our 10 s limit, including the
+first connect after a restart.  The kernel ends an LE connect by itself
+after 20 s; a connect now waits for BlueZ's answer, bounded at 60 s
+only against a call that never returns.
+
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
 
 The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer
