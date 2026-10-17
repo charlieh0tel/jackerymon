@@ -1,7 +1,8 @@
 # jackerymon
 
-Monitor and control a Jackery Explorer power station over Bluetooth LE,
-without Jackery's cloud.  Linux only.  Background: [PLAN.md](PLAN.md),
+Monitor and control Jackery Explorer and HomePower power stations over
+Bluetooth LE, one or several at once, without Jackery's cloud.  Linux
+only.  Background: [PLAN.md](PLAN.md),
 [FINDINGS.md](FINDINGS.md), [docs/protocol.md](docs/protocol.md).
 
 ![The daemon's web view: a day of power and battery history](docs/images/web.png)

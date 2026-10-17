@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Jackery Explorer monitor over BLE: TUI, daemon, metrics"
+description = "Jackery Explorer and HomePower monitor over BLE: TUI, daemon, metrics"
 
 [[bin]]
 name = "jackerymon"
@@ -49,9 +49,10 @@ maintainer = "Christopher Hoover <ch@murgatroid.com>"
 copyright = "2026, Christopher Hoover"
 license-file = ["../../LICENSE-MIT", "0"]
 extended-description = """\
-Talks to a Jackery Explorer power station over Bluetooth LE, without \
-Jackery's cloud: a live terminal view, settings, and a daemon that \
-serves Prometheus metrics, status, and control on a Unix socket."""
+Talks to Jackery Explorer and HomePower power stations over Bluetooth \
+LE, without Jackery's cloud: a live terminal view, settings, and a \
+daemon that serves a web view, Prometheus metrics, status, and control \
+for every unit with a key."""
 section = "utils"
 priority = "optional"
 # systemd provides systemd-sysusers and systemd-tmpfiles for postinst.
