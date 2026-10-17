@@ -61,6 +61,7 @@ pub(crate) async fn run(arguments: TuiArgs) -> Result<()> {
         None => source::direct(&arguments.connection).await?,
     };
     let mut monitor = Monitor::new(source.serial.clone());
+    monitor.name.clone_from(&source.name);
     let mut terminal = ratatui::init();
     let shown = show(
         &mut terminal,

@@ -359,6 +359,7 @@ function unitTable(s) {
     ? `on, ${fmt(v.ac_output_volts, 1)} V ${fmt(v.ac_output_hertz)} Hz`
     : v.ac_output;
   const rows = [
+    ["name", s.name],
     ["model", productName(s)],
     ["serial", s.serial],
     ["AC output", acOut],

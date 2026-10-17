@@ -9,6 +9,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use jackerymon::identity::ModelCode;
 use jackerymon::status::Status;
 
 use super::state::Link;
@@ -62,7 +63,7 @@ impl Exposition {
     ) {
         let extra: String = labels
             .iter()
-            .map(|(key, label)| format!(",{key}=\"{label}\""))
+            .map(|(key, label)| format!(",{key}=\"{}\"", escape(label)))
             .collect();
         let line = format!("{name}{{serial=\"{}\"{extra}}} {value}", self.serial);
         self.family(name, kind, help).samples.push(line);
@@ -98,6 +99,14 @@ impl Exposition {
     }
 }
 
+/// A label value as the exposition format writes it.
+fn escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
 const GAUGE: &str = "gauge";
 const COUNTER: &str = "counter";
 
@@ -106,20 +115,42 @@ fn to_f64(value: u64) -> f64 {
     value as f64
 }
 
-/// The exposition of every unit in `snapshots`.
-pub(super) fn render(snapshots: &[Snapshot], now: SystemTime) -> String {
+/// One unit's state and what identifies it beyond its serial.
+pub(super) struct UnitMetrics {
+    pub(super) snapshot: Snapshot,
+    pub(super) model: ModelCode,
+    /// From the `names` file.
+    pub(super) name: Option<String>,
+}
+
+/// The exposition of every unit in `units`.
+pub(super) fn render(units: &[UnitMetrics], now: SystemTime) -> String {
     let mut out = Exposition {
         families: Vec::new(),
         serial: String::new(),
     };
-    for snapshot in snapshots {
-        out.serial.clone_from(&snapshot.serial);
-        unit(&mut out, snapshot, now);
+    for unit in units {
+        out.serial.clone_from(&unit.snapshot.serial);
+        let model = unit.model.to_string();
+        let mut labels = vec![("model", model.as_str())];
+        if let Some(name) = &unit.name {
+            labels.push(("name", name));
+        }
+        out.sample(
+            (
+                "jackery_unit_info",
+                GAUGE,
+                "Always 1; the unit's model code and name as labels.",
+            ),
+            &labels,
+            1.0,
+        );
+        readings_of(&mut out, &unit.snapshot, now);
     }
     out.text()
 }
 
-fn unit(out: &mut Exposition, snapshot: &Snapshot, now: SystemTime) {
+fn readings_of(out: &mut Exposition, snapshot: &Snapshot, now: SystemTime) {
     let connected = matches!(snapshot.link, Link::Connected);
     out.gauge(
         "jackery_connected",
@@ -249,10 +280,36 @@ mod tests {
     use serde_json::json;
 
     use super::STALE_AFTER;
+    use super::UnitMetrics;
     use super::render;
     use crate::daemon::state::Snapshot;
     use crate::daemon::state::tests::sample;
     use crate::record::Update;
+    use jackerymon::identity::ModelCode;
+
+    fn of(snapshot: Snapshot) -> UnitMetrics {
+        UnitMetrics {
+            snapshot,
+            model: ModelCode::EXPLORER_2000,
+            name: None,
+        }
+    }
+
+    #[test]
+    fn info_carries_the_model_and_an_escaped_name() {
+        let now = SystemTime::now();
+        let unit = UnitMetrics {
+            name: Some("the \"big\" one".to_owned()),
+            ..of(snapshot(now))
+        };
+        let text = render(&[unit], now);
+        assert!(
+            text.contains(
+                "jackery_unit_info{serial=\"123456789\",model=\"12\",name=\"the \\\"big\\\" one\"} 1\n"
+            ),
+            "{text}"
+        );
+    }
 
     fn snapshot(received: SystemTime) -> Snapshot {
         let mut snapshot = Snapshot::new("123456789".to_owned());
@@ -270,7 +327,7 @@ mod tests {
     #[test]
     fn fresh_readings_are_exported() {
         let now = SystemTime::now();
-        let text = render(&[snapshot(now)], now);
+        let text = render(&[of(snapshot(now))], now);
         for expected in [
             "# TYPE jackery_connected gauge\njackery_connected{serial=\"123456789\"} 1\n",
             "jackery_samples_total{serial=\"123456789\"} 3\n",
@@ -288,7 +345,7 @@ mod tests {
     fn stale_readings_are_left_out() {
         let received = SystemTime::now();
         let text = render(
-            &[snapshot(received)],
+            &[of(snapshot(received))],
             received + STALE_AFTER + Duration::from_secs(1),
         );
         assert!(text.contains("jackery_last_sample_timestamp_seconds"));
@@ -300,7 +357,7 @@ mod tests {
         let now = SystemTime::now();
         let mut other = snapshot(now);
         other.serial = "987654321".to_owned();
-        let text = render(&[snapshot(now), other], now);
+        let text = render(&[of(snapshot(now)), of(other)], now);
         assert_eq!(
             text.matches("# TYPE jackery_battery_percent gauge").count(),
             1
@@ -314,7 +371,10 @@ mod tests {
 
     #[test]
     fn nothing_but_counters_before_the_first_sample() {
-        let text = render(&[Snapshot::new("123456789".to_owned())], SystemTime::now());
+        let text = render(
+            &[of(Snapshot::new("123456789".to_owned()))],
+            SystemTime::now(),
+        );
         assert!(text.contains("jackery_connected{serial=\"123456789\"} 0\n"));
         assert!(!text.contains("jackery_last_sample"));
     }

@@ -64,6 +64,8 @@ impl Reading {
 #[derive(Debug)]
 pub(super) struct Monitor {
     pub(super) serial: String,
+    /// From the `names` file.
+    pub(super) name: Option<String>,
     pub(super) link: Link,
     pub(super) latest: Option<Reading>,
     /// Status that arrived but did not decode; cleared by a good one.
@@ -79,6 +81,7 @@ impl Monitor {
     pub(super) fn new(serial: String) -> Self {
         Self {
             serial,
+            name: None,
             link: Link::Searching,
             latest: None,
             invalid: None,

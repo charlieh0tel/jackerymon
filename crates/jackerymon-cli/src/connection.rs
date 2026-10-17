@@ -14,6 +14,7 @@ use clap::Args;
 use jackerymon::key_file::KeyFile;
 use jackerymon::poll::PollConfig;
 
+use crate::names::Names;
 use crate::runtime;
 use crate::runtime::UnitLock;
 
@@ -130,9 +131,10 @@ fn find_key(directory: &Path, unit: Option<&str>) -> Result<PathBuf> {
 /// follow a `set` setting.
 #[derive(Args)]
 pub(crate) struct ConnectionArgs {
-    /// Unit to reach, by serial: its key is `<serial>.json` in the key
-    /// directory.  Optional when that directory holds one key.
-    #[arg(long, global = true, value_name = "SERIAL")]
+    /// Unit to reach, by serial or by its name in the key directory's
+    /// `names` file: its key is `<serial>.json` there.  Optional when that
+    /// directory holds one key.
+    #[arg(long, global = true, value_name = "UNIT")]
     unit: Option<String>,
     /// Key file to use instead of the key directory.
     #[arg(long, global = true, conflicts_with = "unit")]
@@ -151,8 +153,8 @@ pub(crate) struct ConnectionArgs {
 impl ConnectionArgs {
     /// The unit named by `--unit` or `--key-file`, if either is given.
     pub(crate) fn named_unit(&self) -> Result<Option<String>> {
-        if let Some(unit) = &self.unit {
-            return Ok(Some(unit.clone()));
+        if let Some(serial) = self.unit_serial(KeyHome::User)? {
+            return Ok(Some(serial));
         }
         match &self.key_file {
             Some(path) => Ok(Some(KeyFile::load(path)?.serial.to_string())),
@@ -181,17 +183,32 @@ impl ConnectionArgs {
         load_all(&home.directory()?)
     }
 
+    /// `--unit` as a serial: a name from the `names` file in `home`
+    /// stands for its unit's serial.
+    fn unit_serial(&self, home: KeyHome) -> Result<Option<String>> {
+        let Some(unit) = &self.unit else {
+            return Ok(None);
+        };
+        let names = Names::load(&home.directory()?)?;
+        Ok(Some(
+            names
+                .serial(unit)
+                .map_or_else(|| unit.clone(), ToOwned::to_owned),
+        ))
+    }
+
     /// The key for the chosen unit, looked up in `home` unless
     /// `--key-file` names one.
     fn key_file(&self, home: KeyHome) -> Result<KeyFile> {
+        let unit = self.unit_serial(home)?;
         let path = match &self.key_file {
             Some(path) => path.clone(),
-            None => find_key(&home.directory()?, self.unit.as_deref())?,
+            None => find_key(&home.directory()?, unit.as_deref())?,
         };
         let mut key_file = KeyFile::load(&path)?;
         // `--unit A` picks `A.json`; a copied or renamed file could hold
         // another unit's key.
-        if let Some(unit) = &self.unit
+        if let Some(unit) = &unit
             && key_file.serial.as_str() != unit
         {
             bail!(

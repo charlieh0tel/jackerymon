@@ -4,6 +4,7 @@ mod connection;
 mod daemon;
 mod daemon_client;
 mod key;
+mod names;
 mod poll;
 mod record;
 mod runtime;

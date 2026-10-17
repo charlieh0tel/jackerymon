@@ -167,21 +167,30 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// The model of the unit the daemon owns; `None` from a daemon that
-    /// does not say, or does not answer.
-    pub(crate) async fn model(&self) -> Option<ModelCode> {
-        let status: serde_json::Value = self
-            .client
-            .get(format!("{}/status", self.base))
-            .timeout(DAEMON_STATUS_TIMEOUT)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let code = u16::try_from(status["model"].as_u64()?).ok()?;
-        Some(ModelCode(code))
+    /// The model and name of the unit the daemon owns; `None` for what a
+    /// daemon does not say, or both when it does not answer.
+    pub(crate) async fn identity(&self) -> (Option<ModelCode>, Option<String>) {
+        let status: Option<serde_json::Value> = async {
+            self.client
+                .get(format!("{}/status", self.base))
+                .timeout(DAEMON_STATUS_TIMEOUT)
+                .send()
+                .await
+                .ok()?
+                .json()
+                .await
+                .ok()
+        }
+        .await;
+        let Some(status) = status else {
+            return (None, None);
+        };
+        let model = status["model"]
+            .as_u64()
+            .and_then(|code| u16::try_from(code).ok())
+            .map(ModelCode);
+        let name = status["name"].as_str().map(ToOwned::to_owned);
+        (model, name)
     }
 
     /// The serial of the unit the daemon owns.

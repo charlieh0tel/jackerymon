@@ -60,6 +60,11 @@ Every command finds keys there, except `daemon`, which reads
 With several keys, other commands take `--unit SERIAL`; `--key-file`
 names a file directly.
 
+Units can have names: a `names` file beside the keys, one `<serial>
+<name>` per line, `#` for comments.  `--unit` then takes a name too,
+and the web view, the TUI and the metrics (`jackery_unit_info`) show
+it.
+
 ## Commands
 
 ```sh
@@ -140,6 +145,7 @@ disabled.  To run the daemon:
 sudo apt install ./jackerymon_*.deb
 jackerymon key                       # if you have no key yet
 sudo install -m 0640 -g jackerymon ~/.config/jackerymon/*.json /etc/jackerymon/
+sudo install -m 0640 -g jackerymon ~/.config/jackerymon/names /etc/jackerymon/  # if any
 sudo usermod -aG jackerymon $USER    # control through the socket; log in again
 sudo systemctl enable --now jackerymon
 ```

@@ -50,6 +50,7 @@ use crate::connection::ConnectionArgs;
 use crate::connection::KeyHome;
 use crate::daemon::log::SampleLog;
 use crate::daemon::state::Snapshot;
+use crate::names::Names;
 use crate::record::Update;
 use crate::runtime;
 
@@ -103,6 +104,8 @@ pub(crate) struct DaemonArgs {
 struct Unit {
     serial: String,
     model: ModelCode,
+    /// From the `names` file, if it names the unit.
+    name: Option<String>,
     snapshot: Mutex<Snapshot>,
     updates: broadcast::Sender<Update>,
     /// The running poll's settings queue.  Replaced each time polling
@@ -119,6 +122,7 @@ impl Unit {
     fn new(
         serial: String,
         model: ModelCode,
+        name: Option<String>,
         log_dir: Option<PathBuf>,
         stopping: watch::Receiver<bool>,
     ) -> Arc<Self> {
@@ -129,6 +133,7 @@ impl Unit {
             snapshot: Mutex::new(Snapshot::new(serial.clone())),
             serial,
             model,
+            name,
             updates,
             commands: Mutex::new(commands),
             stopping,
@@ -157,6 +162,7 @@ async fn stopped(mut stopping: watch::Receiver<bool>) {
 
 pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
     let key_files = arguments.connection.key_files(KeyHome::System)?;
+    let names = Names::load(&KeyHome::System.directory()?)?;
     if arguments.socket.is_some() && key_files.len() > 1 {
         bail!("--socket is for one unit; choose it with --unit");
     }
@@ -188,7 +194,13 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
             .map(SampleLog::new)
             .transpose()
             .with_context(|| format!("{serial}: sample log"))?;
-        let unit = Unit::new(serial.clone(), key_file.model, log_dir, stopping.clone());
+        let unit = Unit::new(
+            serial.clone(),
+            key_file.model,
+            names.name(&serial).map(ToOwned::to_owned),
+            log_dir,
+            stopping.clone(),
+        );
         info!("{serial}: listening on {}", socket_path.display());
         pollers.push(keep_polling(Arc::clone(&unit), key_file, config, log));
         sockets.push((Arc::clone(&unit), socket));
@@ -433,6 +445,7 @@ mod tests {
             "123456789".to_owned(),
             ModelCode::EXPLORER_2000,
             None,
+            None,
             halting,
         );
         let path = socket_path("failure");
@@ -518,6 +531,7 @@ mod tests {
             "123456789".to_owned(),
             ModelCode::EXPLORER_2000,
             None,
+            None,
             halting,
         );
         let path = socket_path("stalled");
@@ -569,7 +583,13 @@ mod tests {
             runtime::Claimed,
         ) {
             let (halt, halting) = watch::channel(false);
-            let unit = Unit::new(serial.to_owned(), ModelCode::EXPLORER_2000, None, halting);
+            let unit = Unit::new(
+                serial.to_owned(),
+                ModelCode::EXPLORER_2000,
+                None,
+                None,
+                halting,
+            );
             let (socket, claimed) = runtime::claim(path).expect("socket");
             let tcp = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let (stop, stopped) = oneshot::channel::<()>();
@@ -622,6 +642,7 @@ mod tests {
             let unit = Unit::new(
                 serial.to_owned(),
                 ModelCode::EXPLORER_2000,
+                None,
                 None,
                 halting.clone(),
             );
@@ -739,6 +760,7 @@ mod tests {
             let unit = Unit::new(
                 "123456789".to_owned(),
                 ModelCode::EXPLORER_2000,
+                None,
                 log_dir,
                 halting,
             );

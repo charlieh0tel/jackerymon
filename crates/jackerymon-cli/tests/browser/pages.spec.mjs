@@ -41,17 +41,17 @@ test("one unit gets no unit chooser", async ({ page }) => {
 
 test("several units get a chooser that says which are connected", async ({ page }) => {
   const fake = new Fake();
-  fake.units.push({ serial: "987654321", model: 99, model_name: null, link: { state: "searching" } });
+  fake.units.push({ serial: "987654321", name: "shed", model: 99, model_name: null, link: { state: "searching" } });
   await open(page, fake, "/units/855125071405677/?last=600");
   const choice = page.locator("#unit-choice");
   await expect(choice.locator("option")).toHaveText([
     "Explorer 2000 v2 855125071405677: connected",
-    "model 99 987654321: searching",
+    "shed model 99 987654321: searching",
   ]);
   await expect(choice).toHaveValue("855125071405677");
   // States are read again, in place, every 5 s (UNITS_EVERY).
   fake.units[1].link = { state: "connected" };
-  await expect(choice.locator("option").nth(1)).toHaveText("model 99 987654321: connected", { timeout: 10000 });
+  await expect(choice.locator("option").nth(1)).toHaveText("shed model 99 987654321: connected", { timeout: 10000 });
   // Choosing a unit opens its page with the same chart window.
   await page.locator("#ranges button", { hasText: "24 h" }).click();
   await choice.selectOption("987654321");

@@ -211,7 +211,11 @@ fn header_line(monitor: &Monitor, now: Instant) -> Line<'static> {
         },
     );
     let mut spans = vec![
-        Span::raw(format!("Jackery {}", monitor.serial)).bold(),
+        Span::raw(match &monitor.name {
+            Some(name) => format!("Jackery {name} ({})", monitor.serial),
+            None => format!("Jackery {}", monitor.serial),
+        })
+        .bold(),
         Span::raw("  "),
         link,
         Span::raw("  "),

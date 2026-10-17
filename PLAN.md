@@ -26,6 +26,12 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Keys: one file per unit, by serial.**  `~/.config/jackerymon/` for
   interactive commands, `/etc/jackerymon/` for the daemon; `--unit
   SERIAL` chooses, and is optional when one key is present.
+- **Unit names in a `names` file beside the keys,** one `<serial>
+  <name>` per line.  Kept out of the key files, which come from the
+  cloud.  `--unit` takes a name or a serial; the daemon reads
+  `/etc/jackerymon/names`, other commands `~/.config/jackerymon/names`.
+  Metrics carry the name on `jackery_unit_info` rather than on every
+  series, so renaming a unit does not split its history.
 - **Several units: one daemon, a poller per unit** (2026-10-16; until
   then one daemon per unit).  The daemon serves every key in
   `/etc/jackerymon`, or the one `--unit` names: one port, one scrape,

@@ -122,10 +122,10 @@ function render(s) {
       ? `<span class="pill stale">temperature ${esc(v.temperature_alarm)}</span>`
       : "") +
     (s.link?.error ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
-  document.title = `Jackery ${productName(s)} ${s.serial}`;
+  document.title = `Jackery ${unitLabel(s)}`;
   const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
   $("colophon").innerHTML = [
-    `Jackery ${esc(productName(s))} ${esc(s.serial)}`,
+    `Jackery ${esc(unitLabel(s))}`,
     `jackerymon ${esc(s.version ?? "")}`,
     "read-only",
     `© ${esc(s.author ?? "")}`,
@@ -139,6 +139,9 @@ function render(s) {
 
 // The product's name, or its model code when the daemon has no name.
 const productName = (u) => u.model_name ?? `model ${u.model}`;
+// A unit's name from the daemon's names file, if any, its product and its
+// serial.
+const unitLabel = (u) => [u.name, productName(u), u.serial].filter(Boolean).join(" ");
 
 // The units the daemon serves, connected ones first, from `/units`, two levels up
 // from a unit's page; empty until read.  Read again this often, so each
@@ -159,7 +162,7 @@ async function readUnits() {
 function drawUnits() {
   $("units").hidden = units.length < 2;
   const select = $("unit-choice");
-  const label = (u) => `${productName(u)} ${u.serial}: ${LINK_WORDS[u.link?.state] ?? MISSING}`;
+  const label = (u) => `${unitLabel(u)}: ${LINK_WORDS[u.link?.state] ?? MISSING}`;
   const same =
     select.options.length === units.length && units.every((u, i) => select.options[i].value === u.serial);
   // Relabeled in place when the units are the same, so an open list stays open.

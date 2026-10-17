@@ -20,6 +20,7 @@ use crate::connection::ConnectionArgs;
 use crate::connection::KeyHome;
 use crate::daemon_client::DaemonClient;
 use crate::daemon_client::Endpoint;
+use crate::names::Names;
 use crate::record::Update;
 use crate::tui::monitor::HISTORY;
 
@@ -37,6 +38,8 @@ pub(super) struct Source {
     pub(super) serial: String,
     /// `None` when a daemon does not say.
     pub(super) model: Option<ModelCode>,
+    /// From the `names` file, the daemon's or the user's.
+    pub(super) name: Option<String>,
     pub(super) updates: mpsc::UnboundedReceiver<Update>,
     /// One setting at a time; the screen refuses another while one runs.
     pub(super) commands: mpsc::Sender<Command>,
@@ -59,6 +62,9 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
     let (key_file, lock) = connection.claim(KeyHome::User)?;
     let serial = key_file.serial.to_string();
     let model = Some(key_file.model);
+    let name = Names::load(&KeyHome::User.directory()?)?
+        .name(&serial)
+        .map(ToOwned::to_owned);
     // A monitor keeps trying while the unit's radio is off.
     let config = connection.poll_config(None);
     let adapter = ble::default_adapter().await?;
@@ -109,6 +115,7 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
     Ok(Source {
         serial,
         model,
+        name,
         updates,
         commands,
         stop,
@@ -121,7 +128,7 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
 /// Fails if the daemon owns a unit other than `expected`.
 pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Result<Source> {
     let (client, serial) = DaemonClient::connect(endpoint, expected).await?;
-    let model = client.model().await;
+    let (model, name) = client.identity().await;
     let (sender, updates) = mpsc::unbounded_channel();
     // The chart's window of logged samples, so it opens full; the live
     // stream then replays the latest, which the monitor skips as a repeat.
@@ -172,6 +179,7 @@ pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Resul
     Ok(Source {
         serial,
         model,
+        name,
         updates,
         commands,
         stop,

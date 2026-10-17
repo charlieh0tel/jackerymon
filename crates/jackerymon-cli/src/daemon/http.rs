@@ -46,8 +46,8 @@ use super::EVENT_KEEP_ALIVE;
 use super::Unit;
 use super::log;
 use super::metrics;
+use super::metrics::UnitMetrics;
 use super::state::Link;
-use super::state::Snapshot;
 use super::web;
 use super::web::View;
 use crate::record::Update;
@@ -172,6 +172,7 @@ async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
         .map(|(unit, link)| {
             json!({
                 "serial": unit.serial,
+                "name": unit.name,
                 "model": unit.model.0,
                 "model_name": unit.model.name(),
                 "link": link,
@@ -183,22 +184,26 @@ async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
 
 /// Every unit's metrics, each family once.
 async fn all_metrics(units: Vec<Arc<Unit>>) -> impl IntoResponse {
-    let snapshots: Vec<Snapshot> = units
-        .iter()
-        .map(|unit| unit.snapshot.lock().expect("snapshot lock").clone())
-        .collect();
+    let units: Vec<UnitMetrics> = units.iter().map(|unit| unit_metrics(unit)).collect();
     (
         [(CONTENT_TYPE, METRICS_CONTENT_TYPE)],
-        metrics::render(&snapshots, SystemTime::now()),
+        metrics::render(&units, SystemTime::now()),
     )
 }
 
 async fn metrics(State(unit): State<Arc<Unit>>) -> impl IntoResponse {
-    let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
     (
         [(CONTENT_TYPE, METRICS_CONTENT_TYPE)],
-        metrics::render(&[snapshot], SystemTime::now()),
+        metrics::render(&[unit_metrics(&unit)], SystemTime::now()),
     )
+}
+
+fn unit_metrics(unit: &Unit) -> UnitMetrics {
+    UnitMetrics {
+        snapshot: unit.snapshot.lock().expect("snapshot lock").clone(),
+        model: unit.model,
+        name: unit.name.clone(),
+    }
 }
 
 /// Link state, counters, and the latest sample in the `poll` line shape.
@@ -206,6 +211,7 @@ async fn status(State(unit): State<Arc<Unit>>) -> Json<Value> {
     let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
     Json(json!({
         "serial": snapshot.serial,
+        "name": unit.name,
         "model": unit.model.0,
         "model_name": unit.model.name(),
         "link": snapshot.link,
@@ -461,6 +467,7 @@ mod tests {
         let unit = Unit::new(
             "123456789".to_owned(),
             ModelCode::EXPLORER_2000,
+            None,
             None,
             halting,
         );
