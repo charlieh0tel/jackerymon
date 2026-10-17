@@ -465,6 +465,16 @@ was not captured.  Stopping the daemon cleared it, and the unit
 connected at once on restart.  Polling now removes the unit's object,
 logging its state, after three searches in a row miss it.
 
+The Explorer 3000 then did the same under 0.2.1: a connect timed out,
+and it went "not found" for 8 minutes, flashing.  BlueZ had no object
+for its address, so there was nothing to remove, and a separate
+scanning process did not see it either, while it saw the two connected
+units.  The adapter itself kept the unit's advertisements from being
+reported, most likely still trying the timed-out connect, which the
+0.2.1 cancel did not end.  Restarting the daemon, which ends its BlueZ
+sessions, had cleared it before; a unit's polling now ends after six
+failures in a row and starts again with a new session.
+
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
 
 The Explorer 3000 (model 14, "E3000" in the app) answered the Explorer

@@ -37,7 +37,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   LE connection at a time per adapter and fails another with
   "Operation already in progress", which two units retrying in step
   never got past.  A unit whose polling fails, or that another process
-  holds, tries again after 5 s without touching the others.  A key
+  holds, tries again after 5 s without touching the others; so does
+  one after six transport failures in a row, with a new BlueZ session,
+  since bluetoothd drops a stuck connect only with its client's
+  session.  A key
   that does not load is reported and left out.
 - **BLE library: `bluer`.**  btleplug came first, but the unit's empty
   random-type advertisement can take over its BlueZ object and hide it

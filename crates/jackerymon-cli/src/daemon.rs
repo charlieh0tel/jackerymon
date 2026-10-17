@@ -16,6 +16,7 @@ mod web;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -62,6 +63,12 @@ pub(crate) const EVENT_KEEP_ALIVE: Duration = Duration::from_secs(15);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// Settings queued from HTTP while one is being applied.
 const COMMAND_BUFFER: usize = 8;
+/// Transport failures in a row after which a unit's polling ends, and
+/// starts again with a new BlueZ session.  A connect that timed out left
+/// the adapter trying to reach the unit, whose advertisements then went
+/// unreported to every client however long it advertised; bluetoothd
+/// drops such an attempt when its client's session goes (2026-10-16).
+const NEW_SESSION_AFTER: NonZeroU32 = NonZeroU32::new(6).expect("nonzero");
 /// How long a unit waits to poll again after polling failed, as systemd
 /// waited to restart a daemon that served one unit.
 const RESTART_DELAY: Duration = Duration::from_secs(5);
@@ -153,8 +160,9 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
     if arguments.socket.is_some() && key_files.len() > 1 {
         bail!("--socket is for one unit; choose it with --unit");
     }
-    // A daemon keeps trying while a unit's radio is off.
-    let config = arguments.connection.poll_config(None);
+    // A daemon keeps trying while a unit's radio is off, with a new BlueZ
+    // session now and then.
+    let config = arguments.connection.poll_config(Some(NEW_SESSION_AFTER));
     let tcp = TcpListener::bind(arguments.listen)
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;
