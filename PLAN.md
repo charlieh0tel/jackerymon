@@ -58,8 +58,10 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   A connect waits for BlueZ's answer (the kernel gives up after 20 s).
   A failed LE connect, with another unit connected, can leave the
   controller not scanning while bluetoothd reports discovery on; when a
-  unit then goes unfound three times, the adapter is power-cycled, at
-  most once per 10 minutes.  Every unit drops and reconnects.
+  unit then goes unfound three times, the daemon power-cycles the
+  adapter if `--reset-adapter` is set, at most once per 10 minutes, and
+  otherwise says so in its log.  Off by default: every Bluetooth
+  connection on the host drops.
   After three searches in a row miss the unit, remove its object if it
   is not connected, paired or trusted, logging what it held.  A failed
   connect is cancelled: BlueZ goes on with a `Connect` nobody waits

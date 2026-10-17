@@ -5,3 +5,7 @@
 
 # Accept settings over TCP too.  No authentication.
 #JACKERYMON_TCP_CONTROL=false
+
+# Power-cycle the Bluetooth adapter when a unit goes unfound after a
+# failed connect.  Drops every Bluetooth connection on the host.
+#JACKERYMON_RESET_ADAPTER=false

@@ -229,6 +229,7 @@ impl ConnectionArgs {
             interval: self.interval,
             reconnect_delay: RECONNECT_DELAY,
             max_consecutive_failures,
+            reset_adapter: false,
         }
     }
 }

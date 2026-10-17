@@ -163,6 +163,7 @@ pub async fn poll(
         key_file,
         misses: 0,
         failed_connect: false,
+        may_reset_adapter: config.reset_adapter,
     };
     poll_with(unit, config, commands, stop, on_event).await
 }
@@ -255,6 +256,8 @@ struct Unit {
     /// Whether the last connect found the unit and then failed, after
     /// which the controller can stop scanning; see [`Unit::reset_adapter`].
     failed_connect: bool,
+    /// [`PollConfig::reset_adapter`].
+    may_reset_adapter: bool,
 }
 
 impl Unit {
@@ -290,7 +293,7 @@ impl Unit {
     }
 
     /// Turns the adapter off and on, when the unit has gone unfound after
-    /// a connect to it failed.  A failed LE connect, with another unit
+    /// a connect to it failed and [`PollConfig::reset_adapter`] allows it.  A failed LE connect, with another unit
     /// connected, left the controller not scanning while bluetoothd
     /// reported discovery on, so nothing new was found until Bluetooth
     /// restarted; a power cycle cleared it (2026-10-16).  Every connection
@@ -450,7 +453,15 @@ impl Connector for Unit {
             self.clear_stale(limit).await?;
         }
         if self.failed_connect && self.misses >= RESET_AFTER_MISSES {
-            self.reset_adapter(limit).await?;
+            if self.may_reset_adapter {
+                self.reset_adapter(limit).await?;
+            } else {
+                self.failed_connect = false;
+                warn!(
+                    "{} went unfound after a failed connect; the controller may have stopped scanning, which power-cycling the adapter clears",
+                    self.address
+                );
+            }
         }
         // Only objects for addresses starting with the unit's are created,
         // which keeps other devices' advertisements out of BlueZ.

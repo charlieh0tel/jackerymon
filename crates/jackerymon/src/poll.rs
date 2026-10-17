@@ -50,6 +50,10 @@ pub struct PollConfig {
     /// forever, as an interactive monitor should while the unit's radio
     /// is off.
     pub max_consecutive_failures: Option<NonZeroU32>,
+    /// Whether the BLE connector may power-cycle the adapter for a unit
+    /// that goes unfound after a failed connect; see `ble`.  Every
+    /// connection on the adapter drops when it does.
+    pub reset_adapter: bool,
 }
 
 /// A setting change for the poller to apply, answered on `reply`.
@@ -530,6 +534,7 @@ mod tests {
             interval: Duration::from_secs(5),
             reconnect_delay: Duration::from_secs(1),
             max_consecutive_failures: Some(LIMIT),
+            reset_adapter: false,
         }
     }
 

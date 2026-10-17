@@ -82,6 +82,12 @@ pub(crate) struct DaemonArgs {
     /// switch outputs.
     #[arg(long, env = "JACKERYMON_TCP_CONTROL")]
     tcp_control: bool,
+    /// Power-cycle the Bluetooth adapter when a unit goes unfound after a
+    /// failed connect, at most every 10 minutes.  The controller can stop
+    /// scanning then while BlueZ reports it scanning.  Every Bluetooth
+    /// connection on the host drops.
+    #[arg(long, env = "JACKERYMON_RESET_ADAPTER")]
+    reset_adapter: bool,
     /// Unix socket for the full API of the one unit served; default
     /// `$XDG_RUNTIME_DIR/jackerymon/<serial>.sock`, or systemd's runtime
     /// directory.
@@ -160,7 +166,10 @@ pub(crate) async fn run(arguments: DaemonArgs) -> Result<()> {
         bail!("--socket is for one unit; choose it with --unit");
     }
     // A daemon keeps trying while a unit's radio is off.
-    let config = arguments.connection.poll_config(None);
+    let config = PollConfig {
+        reset_adapter: arguments.reset_adapter,
+        ..arguments.connection.poll_config(None)
+    };
     let tcp = TcpListener::bind(arguments.listen)
         .await
         .with_context(|| format!("listening on {}", arguments.listen))?;

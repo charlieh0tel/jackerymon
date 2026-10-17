@@ -492,8 +492,9 @@ the same way, flashing.  `Discovering` stayed true through 60
 half-second samples, across moments when no client of ours was
 searching.  Turning the adapter off and on (`Powered`, user-run) cleared
 it: all three units connected within 7 s and `Discovering` read false.
-A unit that goes unfound three times after a failed connect now has the
-adapter power-cycled, at most once per 10 minutes; the new session
+With `--reset-adapter`, a unit that goes unfound three times after a
+failed connect now has the adapter power-cycled, at most once per 10
+minutes; without it, the daemon logs the condition.  The new session
 after six failures is gone.
 
 ## Explorer 3000 and HomePower 3000 (2026-10-16)
