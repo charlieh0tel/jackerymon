@@ -198,12 +198,12 @@ model table `ib/b.java`):
 | Box | 2001-2002 | `hb/b` |
 | Accessory | 4001-4008 | `hb/a` |
 
-Codes 12 and 14 (RC4, no IV) are implemented and tested. The app's
+Codes 12, 14 and 19 (RC4, no IV) are implemented and tested. The app's
 model specs (`rb/*.java`) name some codes: 12 "E2000Pro2" (Explorer
 2000 v2), 14 "E3000" (Explorer 3000), 19 "HP3000" (HomePower 3000).
-Code 19 takes the same codec and frame version in the app but has not
-answered (`FINDINGS.md`).  Code 14 has no light: it acknowledges `lm`
-and ignores it.
+Code 19 answers like 14, with the same status keys.  Code 14 has no
+light: it acknowledges `lm` and ignores it; the app hides 19's light
+control too.
 
 ### Frame format
 

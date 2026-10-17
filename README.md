@@ -13,8 +13,9 @@ cargo test
 
 ## Hardware
 
-Tested: two Explorer 2000 v2s (app model code 12) and an Explorer 3000
-(14, which has no light), all advertising as `HT`, polled at once by one daemon, from a
+Tested: three Explorer 2000 v2s (app model code 12), an Explorer 3000
+(14) and a HomePower 3000 (19), the last two without a light, all
+advertising as `HT`, polled at once by one daemon, from a
 laptop with an Intel Bluetooth controller, Ubuntu 25.04, Linux 6.14,
 and BlueZ 5.79.
 
@@ -22,10 +23,8 @@ Other units:
 
 - Other Explorers that advertise as `HT`: probably the same protocol,
   but some add an IV to the cipher.  jackerymon refuses models other
-  than 12 and 14 until one is tested; reports welcome on the
+  than 12, 14 and 19 until one is tested; reports welcome on the
   [issues page](https://github.com/charlieh0tel/jackerymon/issues).
-- HomePower 3000 (19): the app uses the same cipher, but the test unit
-  connects and never answers; not supported yet.
 - Explorer 2000 Ultra (`HL`): a different protocol; will not work.
 - SolarVault (models 3001-3004): AES instead of RC4, and likely other
   status keys; support awaits a unit to test.

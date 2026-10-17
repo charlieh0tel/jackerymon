@@ -518,10 +518,14 @@ The HomePower 3000 (model 19, "HP3000"; advertised battery 90,
 bind counter 1) connects and takes the request write, but sends no
 notification: three attempts with 10 s timeouts, three with 30 s.  The
 app gives it the same GATT UUIDs, codec (RC4, no IV) and frame version
-as models 12 and 14.  The unit may be bound to another account: the
-cloud gave this account a key for its serial, and a key the unit does
-not use would explain the silence.  Unconfirmed until the unit is
-bound to the account that fetched the key.
+as models 12 and 14.
+
+Later (2026-10-17 05:46 UTC), with no phone app near it, the same unit
+answered the first request with the same key: 29 status keys, the
+Explorer 3000's set, with plausible values (charging at 822 W from AC,
+AC output 119.1 V at 60 Hz).  The key was right all along.  The
+earlier silence is unexplained; the phone's Jackery app was attached
+to it around then, which may be the cause.
 
 ## Open questions
 

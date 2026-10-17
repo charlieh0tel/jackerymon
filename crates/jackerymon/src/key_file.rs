@@ -106,10 +106,12 @@ mod tests {
 
     #[test]
     fn parses_poc_layout() {
-        assert!(
-            KeyFile::parse(&text(14, "dGVzdC1rZXk=")).is_ok(),
-            "Explorer 3000"
-        );
+        for (model, product) in [(14, "Explorer 3000"), (19, "HomePower 3000")] {
+            assert!(
+                KeyFile::parse(&text(model, "dGVzdC1rZXk=")).is_ok(),
+                "{product}"
+            );
+        }
         let file = KeyFile::parse(&text(12, "dGVzdC1rZXk=")).expect("valid file");
         assert_eq!(file.address, "90:E5:B1:21:ED:BA");
         assert_eq!(file.serial.as_str(), "123456789");

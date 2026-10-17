@@ -71,9 +71,15 @@ impl ModelCode {
     pub const EXPLORER_2000: Self = Self(12);
     /// Explorer 3000 ("E3000"); same codec, answers the same requests.
     pub const EXPLORER_3000: Self = Self(14);
-    /// Models that have answered.  The HomePower 3000 (19, "HP3000")
-    /// takes the same codec in the app but has not answered.
-    pub const SUPPORTED: [Self; 2] = [Self::EXPLORER_2000, Self::EXPLORER_3000];
+    /// HomePower 3000 ("HP3000"); same codec and status keys as the
+    /// Explorer 3000.
+    pub const HOMEPOWER_3000: Self = Self(19);
+    /// Models that have answered.
+    pub const SUPPORTED: [Self; 3] = [
+        Self::EXPLORER_2000,
+        Self::EXPLORER_3000,
+        Self::HOMEPOWER_3000,
+    ];
 
     /// The product's name, for a model that has one here.
     #[must_use]
@@ -81,16 +87,18 @@ impl ModelCode {
         match self {
             Self::EXPLORER_2000 => Some("Explorer 2000 v2"),
             Self::EXPLORER_3000 => Some("Explorer 3000"),
+            Self::HOMEPOWER_3000 => Some("HomePower 3000"),
             _ => None,
         }
     }
 
     /// Whether the model has a light.  The Explorer 3000 has none: it
     /// acknowledges a light setting and ignores it, and the app hides its
-    /// light control (`rb/j`).
+    /// light control (`rb/j`).  The app hides the HomePower 3000's too
+    /// (`rb/i`).
     #[must_use]
     pub fn has_light(self) -> bool {
-        self != Self::EXPLORER_3000
+        self != Self::EXPLORER_3000 && self != Self::HOMEPOWER_3000
     }
 
     /// [`Self::SUPPORTED`], for messages.
