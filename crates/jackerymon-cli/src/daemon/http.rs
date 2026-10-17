@@ -48,6 +48,7 @@ use super::log;
 use super::metrics;
 use super::metrics::UnitMetrics;
 use super::state::Link;
+use super::state::Snapshot;
 use super::web;
 use super::web::View;
 use crate::record::Update;
@@ -118,9 +119,23 @@ pub(super) fn socket_router(unit: Arc<Unit>) -> Router {
 pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     let all = units.to_vec();
     let listed = units.to_vec();
-    let chosen = units.to_vec();
     let mut router = Router::new()
-        .route("/", get(move |query| first_unit(chosen, query)))
+        .route(
+            "/",
+            get(|| async { page(HTML_CONTENT_TYPE, web::OVERVIEW) }),
+        )
+        .route(
+            "/style.css",
+            get(|| async { page(CSS_CONTENT_TYPE, web::STYLE) }),
+        )
+        .route(
+            "/common.js",
+            get(|| async { page(JS_CONTENT_TYPE, web::COMMON) }),
+        )
+        .route(
+            "/charts.js",
+            get(|| async { page(JS_CONTENT_TYPE, web::CHARTS) }),
+        )
         .route("/metrics", get(move || all_metrics(all)))
         .route(UNITS, get(move || unit_list(listed)));
     for unit in units {
@@ -135,29 +150,23 @@ pub(super) fn tcp_router(units: &[Arc<Unit>], control: bool) -> Router {
     router
 }
 
-/// The units and their links, connected ones first, each group by
-/// serial.
-fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Link)> {
-    let mut listed: Vec<(&Unit, Link)> = units
+/// The units and what they last reported, connected ones first, each
+/// group by serial.
+fn ordered(units: &[Arc<Unit>]) -> Vec<(&Unit, Snapshot)> {
+    let mut listed: Vec<(&Unit, Snapshot)> = units
         .iter()
         .map(|unit| {
-            let link = unit.snapshot.lock().expect("snapshot lock").link.clone();
-            (unit.as_ref(), link)
+            let snapshot = unit.snapshot.lock().expect("snapshot lock").clone();
+            (unit.as_ref(), snapshot)
         })
         .collect();
-    listed.sort_by_key(|(unit, link)| (!matches!(link, Link::Connected), unit.serial.clone()));
+    listed.sort_by_key(|(unit, snapshot)| {
+        (
+            !matches!(snapshot.link, Link::Connected),
+            unit.serial.clone(),
+        )
+    });
     listed
-}
-
-/// A redirect to the first unit's page, as [`ordered`] puts them.
-async fn first_unit(units: Vec<Arc<Unit>>, query: RawQuery) -> Redirect {
-    // Relative, so it resolves against `/`.
-    let first = ordered(&units)
-        .into_iter()
-        .next()
-        .map(|(unit, _)| format!("{}/{}/", UNITS.trim_start_matches('/'), unit.serial))
-        .unwrap_or_default();
-    to(first, query).await
 }
 
 /// A redirect to `target`, keeping the query, such as the chart window.
@@ -168,18 +177,24 @@ async fn to(target: String, RawQuery(query): RawQuery) -> Redirect {
     }
 }
 
-/// The units served, their models and links, as [`ordered`] puts them,
-/// for the page's unit chooser.
+/// The units served, as [`ordered`] puts them, for the overview and the
+/// unit page's chooser: each one's model, link, latest reading worded as
+/// the page shows it, and when that was taken.
 async fn unit_list(units: Vec<Arc<Unit>>) -> Json<Value> {
     let listed: Vec<Value> = ordered(&units)
         .into_iter()
-        .map(|(unit, link)| {
+        .map(|(unit, snapshot)| {
+            let latest = snapshot.latest.as_ref();
             json!({
                 "serial": unit.serial,
                 "name": unit.name,
                 "model": unit.model.0,
                 "model_name": unit.model.name(),
-                "link": link,
+                "link": snapshot.link,
+                "view": latest
+                    .and_then(|latest| latest.status.as_ref())
+                    .map(|status| View::new(status, unit.model)),
+                "taken": latest.map(|latest| latest.record.timestamp.as_str()),
             })
         })
         .collect();

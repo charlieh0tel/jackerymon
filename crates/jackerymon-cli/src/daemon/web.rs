@@ -26,6 +26,7 @@ use crate::text::temperature_alarm_text;
 use crate::text::timer_text;
 
 pub(super) const INDEX: &str = include_str!("web/index.html");
+pub(super) const OVERVIEW: &str = include_str!("web/overview.html");
 pub(super) const STYLE: &str = include_str!("web/style.css");
 pub(super) const COMMON: &str = include_str!("web/common.js");
 pub(super) const CHARTS: &str = include_str!("web/charts.js");

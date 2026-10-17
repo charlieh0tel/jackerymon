@@ -41,6 +41,46 @@ test("a named unit's name follows the pill", async ({ page }) => {
   await expect(page).toHaveTitle("Jackery garage Explorer 2000 v2 855125071405677");
 });
 
+test("the overview lists each unit with its reading, and the live total", async ({ page }) => {
+  const fake = new Fake();
+  fake.root = "overview.html";
+  fake.units.push({ serial: "987654321", name: "shed", model: 14, model_name: "Explorer 3000", link: { state: "connected" } });
+  await open(page, fake, "/?last=600");
+  const rows = page.locator("#fleet tr");
+  // A header, a row per unit, and the total.
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(2)).toContainText("shed Explorer 3000 987654321");
+  await expect(rows.nth(2).locator(".pill")).toHaveText("LIVE");
+  await expect(rows.nth(2)).toContainText("87 %");
+  await expect(rows.nth(2).locator("a")).toHaveAttribute("href", "units/987654321/?last=600");
+  // Both units read 412 W in.
+  await expect(rows.nth(3)).toContainText("824 W");
+  await expect(page.locator("#colophon")).toContainText("Jackery units");
+});
+
+test("the overview charts charge, all units together, and each unit", async ({ page }) => {
+  const fake = new Fake();
+  fake.root = "overview.html";
+  fake.units.push({ serial: "987654321", name: "shed", model: 14, model_name: "Explorer 3000", link: { state: "connected" } });
+  await open(page, fake);
+  await expect(page.locator("#charts .uplot")).toHaveCount(4);
+  await expect(page.locator("#charts .u-title")).toHaveText([
+    "Charge",
+    "All units",
+    "Explorer 2000 v2 855125071405677",
+    "shed Explorer 3000 987654321",
+  ]);
+  // Every unit's series are read for the same window.
+  expect(fake.seen.series).toBe(2);
+});
+
+test("a unit page links back to the overview", async ({ page }) => {
+  const fake = new Fake();
+  fake.units.push({ serial: "987654321", model: 99, model_name: null, link: { state: "searching" } });
+  await open(page, fake, "/units/855125071405677/?last=600");
+  await expect(page.locator("#all-units")).toHaveAttribute("href", "../../?last=600");
+});
+
 test("one unit gets no unit chooser", async ({ page }) => {
   const fake = new Fake();
   await open(page, fake);

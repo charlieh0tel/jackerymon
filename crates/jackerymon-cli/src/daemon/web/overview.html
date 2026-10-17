@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jackery units</title>
+
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css"
+      integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE"
+      crossorigin="anonymous">
+
+<link rel="stylesheet" href="style.css">
+
+<div class="panel">
+  <h2>Units</h2>
+  <div class="scroll"><table id="fleet"><tr><td class="muted">connecting...</td></tr></table></div>
+</div>
+
+<div class="panel">
+  <div class="controls">
+    <h2>History</h2>
+    <span class="grow"></span>
+    <span id="ranges"></span>
+  </div>
+  <div id="charts"></div>
+  <div id="note"></div>
+</div>
+
+<footer id="colophon"></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"
+        integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c"
+        crossorigin="anonymous"></script>
+<script src="common.js"></script>
+<script src="charts.js"></script>
+<script>
+"use strict";
+
+// Every unit the daemon serves: a live table, then charts over the
+// chosen window of each unit's charge, the input and output of them all
+// together, and each unit's power.  Each unit's own page has the rest.
+
+// One color per unit, in the order /units lists them, round again past
+// the last.
+const UNIT_COLORS = ["#38bdf8", "#4ade80", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c", "#2dd4bf", "#f87171"];
+const unitColor = (index) => UNIT_COLORS[index % UNIT_COLORS.length];
+
+let range = readRange();
+
+// The units' /units entries as last read; the footer is drawn from the
+// first one's /status, once.
+let fleet = [];
+let footed = false;
+
+async function readFleet() {
+  const listed = await getJson("units");
+  if (!Array.isArray(listed)) {
+    fleet = [];
+    $("fleet").innerHTML =
+      `<tr><td><span class="pill down">NO DAEMON</span> <span class="muted">${esc(listed.error ?? "")}</span></td></tr>`;
+    return;
+  }
+  fleet = listed;
+  drawFleet();
+  if (!footed && fleet.length) {
+    const s = await getJson(`units/${encodeURIComponent(fleet[0].serial)}/status`);
+    if (!s.error) {
+      colophon("Jackery units", s);
+      footed = true;
+    }
+  }
+}
+
+// A row per unit, and the total input and output of those with a
+// fresh reading.
+function drawFleet() {
+  const header = ["unit", "state", "battery", "input", "output", "battery temp", "to full", "to empty", "updated"];
+  let input = 0;
+  let output = 0;
+  const rows = fleet.map((u) => {
+    const v = u.view ?? {};
+    const age = ageAt(u.taken);
+    const [kind, word] = linkPill(u.link, age);
+    if (kind === "live") {
+      input += v.input_watts ?? 0;
+      output += v.output_watts ?? 0;
+    }
+    const page = `units/${encodeURIComponent(u.serial)}/${location.search}`;
+    return [
+      `<a href="${esc(page)}">${esc(unitLabel(u))}</a>`,
+      `<span class="pill ${kind}">${word}</span>`,
+      esc(unitText(v.battery_percent, "%")),
+      esc(unitText(v.input_watts, "W")),
+      esc(unitText(v.output_watts, "W")),
+      esc(unitText(v.battery_celsius, "°C", 1)),
+      esc(unitText(v.hours_to_full, "h", 1)),
+      esc(unitText(v.hours_to_empty, "h", 1)),
+      esc(age === null ? MISSING : `${age.toFixed(0)} s ago`),
+    ];
+  });
+  const total = ["total, live units", "", "", unitText(input, "W"), unitText(output, "W"), "", "", "", ""].map(esc);
+  const cells = (row, tag) => row.map((cell) => `<${tag}>${cell}</${tag}>`).join("");
+  $("fleet").innerHTML =
+    `<tr>${cells(header.map(esc), "th")}</tr>` +
+    rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("") +
+    `<tr class="total">${cells(total, "td")}</tr>`;
+}
+
+// Each unit's columns on one time axis: uPlot.join keeps every row any
+// unit has, with nulls where the others have none.
+function joined(series, column) {
+  return uPlot.join(series.map((s) => [s.time, s[column]]));
+}
+
+// The sum of a row's values, null when none has one.
+function rowSums(table) {
+  return table[0].map((_, i) => {
+    const present = table.slice(1).map((values) => values[i]).filter((v) => v != null);
+    return present.length ? present.reduce((sum, v) => sum + v, 0) : null;
+  });
+}
+
+async function load(signal) {
+  if (!haveUplot) {
+    clearCharts("the chart library could not be loaded from cdn.jsdelivr.net; the table above still updates", true);
+    return;
+  }
+  const listed = await ask("units", signal);
+  if (!listed.length) {
+    clearCharts("no units");
+    return;
+  }
+  const until = new Date();
+  const since = new Date(until.getTime() - range * 1000);
+  const every = Math.max(1, Math.round(range / POINTS));
+  const q = new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), every });
+  const series = await Promise.all(
+    listed.map((u) => ask(`units/${encodeURIComponent(u.serial)}/series?${q}`, signal)),
+  );
+  if (series.every((s) => !s.time.length)) {
+    clearCharts("no samples logged in this window");
+    return;
+  }
+  clearCharts("");
+  const charge = joined(series, "battery_percent");
+  const [percent] = aligned([
+    { ...extent(charge.slice(1).flat(), PERCENT_STEP), ceiling: FULL },
+  ]);
+  const input = joined(series, "input_watts");
+  const output = joined(series, "output_watts");
+  // Input and output share a time axis for the totals.
+  const power = uPlot.join([
+    [input[0], rowSums(input)],
+    [output[0], rowSums(output)],
+  ]);
+  charts = [
+    chart(
+      "Charge",
+      charge,
+      listed.map((u, i) => ({ label: `${unitLabel(u)} %`, stroke: unitColor(i), scale: "%" })),
+      [yAxis("%", AXIS_DIM, percent)],
+      { "%": alignedScale(percent) },
+    ),
+    chart(
+      "All units",
+      power,
+      [
+        { label: "input W", stroke: INPUT, scale: "W" },
+        { label: "output W", stroke: OUTPUT, scale: "W" },
+      ],
+      [yAxis("W")],
+    ),
+    ...listed.map((u, i) =>
+      chart(
+        unitLabel(u),
+        [series[i].time, series[i].input_watts, series[i].output_watts],
+        [
+          { label: "input W", stroke: INPUT, scale: "W" },
+          { label: "output W", stroke: OUTPUT, scale: "W" },
+        ],
+        [yAxis("W")],
+      ),
+    ),
+  ];
+}
+
+rangeControl($("ranges"), range, (last) => {
+  range = last;
+  drawFleet();
+  renew();
+});
+// Charts follow the panel's width, all at once.
+new ResizeObserver(() => {
+  for (const c of charts) c.setSize({ width: $("charts").clientWidth, height: CHART_HEIGHT });
+}).observe($("charts"));
+
+content({
+  load,
+  clear: clearCharts,
+  every: CHART_EVERY,
+  auto: () => true,
+  live: [[readFleet, STRIP_EVERY]],
+});
+</script>

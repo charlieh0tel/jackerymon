@@ -25,7 +25,9 @@ const UPLOT = join(here, "node_modules", "uplot", "dist");
 //   lost      the link error, or null while connected
 //   failed    why polling ended, or null; it starts again shortly
 //   name      the unit's name from the daemon's names file, or null
-//   units     the /units answer: the units the daemon serves
+//   units     the units the daemon serves, for /units, each with the
+//             latest reading of /status
+//   root      the page at /: the unit page, or the overview
 //   age       seconds since the latest sample, or null for none yet
 //   series    the /series answer, or null for 404 (no --log-dir)
 //   delay     milliseconds to hold each endpoint's answer, by name
@@ -38,6 +40,7 @@ export class Fake {
     const { serial, model, model_name } = RECORDED.status;
     this.units = [{ serial, model, model_name, link: { state: "connected" } }];
     this.age = 2;
+    this.root = "index.html";
     this.series = structuredClone(RECORDED.series);
     this.delay = {};
     // Requests seen, by endpoint, and the last query of each.
@@ -61,7 +64,10 @@ export class Fake {
 
   answer(endpoint) {
     if (endpoint === "status") return [200, this.status()];
-    if (endpoint === "units") return [200, this.units];
+    if (endpoint === "units") {
+      const { view, latest } = this.status();
+      return [200, this.units.map((unit) => ({ view, taken: latest?.timestamp ?? null, ...unit }))];
+    }
     if (endpoint === "series") {
       return this.series ? [200, this.series] : [404, { error: "no history: the daemon has no --log-dir" }];
     }
@@ -77,7 +83,7 @@ export class Fake {
       // The daemon serves a unit's page and data under its own address,
       // and the list of units at /units.
       const path = url.pathname.replace(/^\/units\/[^/]+(?=\/)/, "");
-      const file = FILES[path];
+      const file = path === "/" ? [this.root, FILES["/"][1]] : FILES[path];
       if (file) {
         await route.fulfill({ path: join(PAGES, file[0]), contentType: file[1] });
         return;

@@ -35,8 +35,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
 - **Several units: one daemon, a poller per unit** (2026-10-16; until
   then one daemon per unit).  The daemon serves every key in
   `/etc/jackerymon`, or the one `--unit` names: one port, one scrape,
-  one page with a chooser of units, connected ones first, each group
-  by serial, with its model and link state.  Each unit has its own BlueZ
+  an overview of every unit at TCP's `/` and, on each unit's page, a
+  chooser of units, connected ones first, each group by serial, with
+  its model and link state.  Each unit has its own BlueZ
   session (BlueZ keeps one scan filter per D-Bus client, so pollers
   sharing one overwrite each other's), lock, socket, and log
   directory.  Units take turns finding and connecting: BlueZ makes one
@@ -141,8 +142,11 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   one-key body; answers once status confirms it, within 60 s including
   queueing).  TCP, `127.0.0.1:9888` by default, serves each unit's
   read-only routes under `/units/<serial>/` unless `--tcp-control`,
-  every unit's metrics at `/metrics`, the units at `/units`, and sends
-  `/` to the first unit's page.  A daemon refuses to start while
+  every unit's metrics at `/metrics`, the units with their latest
+  readings at `/units`, and the overview at `/`.  The overview's
+  charts read each unit's `/series` for the window; the totals add up
+  units' readings interval by interval, and its live total counts only
+  units with a fresh reading.  A daemon refuses to start while
   another answers on its socket, and replaces a dead one's leftover.
   Optional `--log-dir` writes daily JSON-lines files, in a directory
   per unit.  Readings older than 60 s are left out of `/metrics`.  A

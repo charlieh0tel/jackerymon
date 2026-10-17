@@ -684,9 +684,23 @@ mod tests {
                     .starts_with("<!doctype html>")
             );
         }
-        let landed = get("/?last=600").await.expect("page");
-        assert_eq!(landed.url().path(), "/units/111/");
-        assert_eq!(landed.url().query(), Some("last=600"));
+        // The overview is at the root, with the files it shares with
+        // the unit pages.
+        let overview = get("/").await.expect("overview");
+        assert_eq!(overview.url().path(), "/");
+        assert!(
+            overview
+                .text()
+                .await
+                .expect("body")
+                .contains("<title>Jackery units</title>")
+        );
+        for asset in ["/style.css", "/common.js", "/charts.js"] {
+            assert!(
+                get(asset).await.expect("asset").status().is_success(),
+                "{asset}"
+            );
+        }
         let listed: serde_json::Value = get("/units")
             .await
             .expect("units")
@@ -708,7 +722,6 @@ mod tests {
             &Update::Connected { connection: 1 },
             std::time::SystemTime::now(),
         );
-        assert_eq!(get("/").await.expect("page").url().path(), "/units/222/");
         let listed: serde_json::Value = get("/units")
             .await
             .expect("units")

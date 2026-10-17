@@ -87,21 +87,23 @@ async function tick() {
   }
 }
 
-// Seconds since the latest sample was taken, by its own timestamp.
-function ageOf(s) {
-  const at = s.latest?.timestamp;
-  return at ? Math.max(0, (Date.now() - Date.parse(at)) / 1000) : null;
+// Seconds since a sample was taken, by its own timestamp; null for none.
+const ageAt = (taken) => (taken ? Math.max(0, (Date.now() - Date.parse(taken)) / 1000) : null);
+
+// A unit's state as a pill, its class and its word, from its link and
+// the age of its latest reading.
+function linkPill(link, age) {
+  return link?.state === "lost" ? ["down", "RECONNECTING"]
+    : link?.state === "failed" ? ["down", "RESTARTING"]
+    : age === null ? ["stale", "SEARCHING"]
+    : age > STALE_AFTER ? ["stale", "STALE"]
+    : ["live", "LIVE"];
 }
 
 function render(s) {
   const v = s.view ?? {};
-  const age = ageOf(s);
-  const state =
-    s.link?.state === "lost" ? ["down", "RECONNECTING"]
-    : s.link?.state === "failed" ? ["down", "RESTARTING"]
-    : age === null ? ["stale", "SEARCHING"]
-    : age > STALE_AFTER ? ["stale", "STALE"]
-    : ["live", "LIVE"];
+  const age = ageAt(s.latest?.timestamp);
+  const state = linkPill(s.link, age);
   const stats = [
     ["battery", unitText(v.battery_percent, "%")],
     ["input", unitText(v.input_watts, "W")],
@@ -124,9 +126,15 @@ function render(s) {
       : "") +
     (s.link?.error ? ` <span class="muted">${esc(s.link.error)}</span>` : "");
   document.title = `Jackery ${unitLabel(s)}`;
+  colophon(`Jackery ${unitLabel(s)}`, s);
+}
+
+// The footer: what the page shows, then the daemon's version, author,
+// license and links from a unit's /status `s`.
+function colophon(what, s) {
   const link = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
   $("colophon").innerHTML = [
-    `Jackery ${esc(unitLabel(s))}`,
+    esc(what),
     `jackerymon ${esc(s.version ?? "")}`,
     "read-only",
     `© ${esc(s.author ?? "")}`,
@@ -158,10 +166,12 @@ async function readUnits() {
   drawUnits();
 }
 
-// A chooser of units with their link states, hidden for one unit.
-// Choosing one opens its page with the same chart window.
+// A chooser of units with their link states, and a link to the
+// overview of them all, hidden for one unit.  Choosing one opens its
+// page with the same chart window.
 function drawUnits() {
   $("units").hidden = units.length < 2;
+  $("all-units").href = `../../${location.search}`;
   const select = $("unit-choice");
   const label = (u) => `${unitLabel(u)}: ${LINK_WORDS[u.link?.state] ?? MISSING}`;
   const same =
@@ -179,7 +189,9 @@ function drawUnits() {
 
 // The page, as it described itself to `content`: `load(signal)` draws
 // its content, `clear(why, bad)` takes it down saying why, `every` and
-// `auto()` say when to read again, `status(s)` sees each strip read.
+// `auto()` say when to read again, `status(s)` sees each strip read, and
+// `live`, pairs of a read and its period in milliseconds, keeps the
+// live parts current; a unit page's strip and chooser when absent.
 let page = null;
 // The read in progress, and whether another was asked for meanwhile.
 let running = null;
@@ -215,17 +227,21 @@ function renew() {
   refresh();
 }
 
-function content(spec) {
+async function content(spec) {
   page = spec;
-  tick().then(readUnits);
-  setInterval(readUnits, UNITS_EVERY);
-  setInterval(tick, STRIP_EVERY);
+  const live = page.live ?? [
+    [tick, STRIP_EVERY],
+    [readUnits, UNITS_EVERY],
+  ];
+  for (const [read, every] of live) setInterval(read, every);
   if (page.every) {
     setInterval(() => {
       if (page.auto()) refresh();
     }, page.every);
   }
   refresh();
+  // In order the first time: the chooser marks the unit the strip read.
+  for (const [read] of live) await read();
 }
 
 // ---------------------------------------------------------------- range
