@@ -16,6 +16,8 @@ test("the strip shows the latest reading as live", async ({ page }) => {
   await open(page, fake);
   const strip = page.locator("#status");
   await expect(strip.locator(".pill")).toHaveText("LIVE");
+  // Unnamed, the unit goes by its product.
+  await expect(strip.locator("#unit-name")).toHaveText("Explorer 2000 v2");
   await expect(strip).toContainText("87 %");
   await expect(strip).toContainText("412 W");
   await expect(strip).toContainText("24.1 °C");
@@ -29,6 +31,14 @@ test("the strip shows the latest reading as live", async ({ page }) => {
     "href",
     "https://github.com/charlieh0tel/jackerymon/issues",
   );
+});
+
+test("a named unit's name follows the pill", async ({ page }) => {
+  const fake = new Fake();
+  fake.name = "garage";
+  await open(page, fake);
+  await expect(page.locator("#status .pill + #unit-name")).toHaveText("garage");
+  await expect(page).toHaveTitle("Jackery garage Explorer 2000 v2 855125071405677");
 });
 
 test("one unit gets no unit chooser", async ({ page }) => {

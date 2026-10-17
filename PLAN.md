@@ -144,7 +144,7 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   startup failure: no usable key, a socket another daemon answers on,
   an unusable log directory, or the TCP address.
 - **Web view, after smartclock-web.**  The daemon serves one page at
-  `/` over TCP, read-only: a status strip polled every second; power
+  `/` over TCP, read-only: a status strip polled every second, the unit's name (or product) beside its state; power
   and battery charts over the last 10 min, 6 h, 24 h or 7 d, or any
   whole number of minutes, hours, days or weeks typed in, ending now; and the unit's settings.  The
   power chart draws each input source that delivered anything in the

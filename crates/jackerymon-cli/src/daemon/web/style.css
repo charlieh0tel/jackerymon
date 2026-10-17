@@ -30,6 +30,8 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim);
 .stat .k { font-size: 11px; color: var(--dim); }
 .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 #age { min-width: 14ch; }
+/* The unit's name, beside the pill, so it reads before the numbers. */
+#unit-name { font-weight: 600; }
 .live { background: #14532d; color: var(--ok); }
 .stale { background: #422006; color: var(--warn); }
 .down { background: #450a0a; color: var(--bad); }

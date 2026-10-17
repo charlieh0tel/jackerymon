@@ -113,6 +113,7 @@ function render(s) {
   ];
   $("status").innerHTML =
     `<span class="pill ${state[0]}">${state[1]}</span>` +
+    `<span id="unit-name">${esc(s.name ?? productName(s))}</span>` +
     `<span class="muted" id="age">${age === null ? "no reading yet" : `updated ${age.toFixed(0)} s ago`}</span>` +
     stats
       .map(([k, value]) => `<span class="stat"><span class="v">${esc(value)}</span><span class="k">${esc(k)}</span></span>`)

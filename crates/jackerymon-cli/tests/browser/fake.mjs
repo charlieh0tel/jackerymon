@@ -23,6 +23,7 @@ const UPLOT = join(here, "node_modules", "uplot", "dist");
 //   up        whether the daemon answers at all
 //   lost      the link error, or null while connected
 //   failed    why polling ended, or null; it starts again shortly
+//   name      the unit's name from the daemon's names file, or null
 //   units     the /units answer: the units the daemon serves
 //   age       seconds since the latest sample, or null for none yet
 //   series    the /series answer, or null for 404 (no --log-dir)
@@ -32,6 +33,7 @@ export class Fake {
     this.up = true;
     this.lost = null;
     this.failed = null;
+    this.name = null;
     const { serial, model, model_name } = RECORDED.status;
     this.units = [{ serial, model, model_name, link: { state: "connected" } }];
     this.age = 2;
@@ -46,6 +48,7 @@ export class Fake {
     const body = structuredClone(RECORDED.status);
     if (this.lost) body.link = { state: "lost", error: this.lost, consecutive: 1 };
     if (this.failed) body.link = { state: "failed", error: this.failed };
+    body.name = this.name;
     if (this.age === null) {
       body.latest = null;
       body.view = null;
