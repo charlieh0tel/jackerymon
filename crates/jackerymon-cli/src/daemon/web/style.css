@@ -68,6 +68,11 @@ footer { grid-column: 1 / -1; color: var(--dim); font-size: 11px; }
 footer a { color: var(--dim); }
 
 .uplot { width: 100% !important; }
+/* A legend value takes the same room hovered or not, so the legend
+   never wraps differently and moves the page: room for "-1234.5 W",
+   and for the time, "2026-10-13 12:59pm". */
+.u-legend .u-value { display: inline-block; min-width: 9ch; }
+.u-legend .u-series:first-child .u-value { min-width: 18ch; }
 /* Left, where the eye starts, and where the y axis label already is. */
 .u-title { text-align: left; padding-left: 2px; }
 #charts > div + div { margin-top: 8px; }

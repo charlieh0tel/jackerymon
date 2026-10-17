@@ -170,7 +170,8 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   brief fault shows at 7 d.  It uses power above zero rather than the
   unit's battery state, which reads idle while charging (FINDINGS.md).
   Y axes have fixed widths, and a chart without a right axis pads the
-  same room, so the time axes line up.  Y axes have no rotated titles;
+  same room, so the time axes line up.  Legend values have fixed widths, so hovering never rewraps a legend
+  and moves the page.  Y axes have no rotated titles;
   each number carries its unit, in its line's color.  A right axis takes the left's
   number of divisions, each a round step, so its ticks fall on the
   left's gridlines.  Same

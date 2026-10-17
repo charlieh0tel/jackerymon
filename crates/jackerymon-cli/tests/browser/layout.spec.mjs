@@ -27,3 +27,25 @@ test("the charts' time axes line up when drawing them adds a scrollbar", async (
   const panel = await page.locator("#charts").evaluate((e) => e.clientWidth);
   expect(power.width).toBeLessThan(panel);
 });
+
+test("hovering a chart does not move the page", async ({ page }) => {
+  const fake = new Fake();
+  fake.root = "overview.html";
+  const add = (serial, name, model, model_name) =>
+    fake.units.push({ serial, name, model, model_name, link: { state: "connected" } });
+  add("855225011707296", "bob", 14, "Explorer 3000");
+  add("860125092302121", "darryl", 19, "HomePower 3000");
+  add("855124090905001", "mikko", 12, "Explorer 2000 v2");
+  // A width at which hover values once wrapped the legend onto a new line.
+  await page.setViewportSize({ width: 900, height: 900 });
+  await fake.install(page);
+  await page.goto("/?last=21600");
+  await expect(page.locator("#charts .uplot")).toHaveCount(7);
+  const heights = () =>
+    page.locator("#charts .uplot").evaluateAll((all) => all.map((chart) => chart.getBoundingClientRect().height));
+  const before = await heights();
+  const plot = await page.locator("#charts .u-over").nth(1).boundingBox();
+  await page.mouse.move(plot.x + plot.width / 2, plot.y + plot.height / 2);
+  await expect(page.locator("#charts .u-legend").nth(1)).not.toContainText("--");
+  expect(await heights()).toEqual(before);
+});
