@@ -71,16 +71,22 @@ it.
 jackerymon poll            # JSON line per sample until Ctrl-C; --count N
 jackerymon tui             # live status screen; m opens settings
 jackerymon set light low   # change one setting; see set --help
+jackerymon raw 32 '{"en":1}'  # one command as given; prints the echo
 jackerymon daemon          # web view, metrics, status, settings over HTTP
 ```
 
 `set` and the TUI report a change only once a status read shows it.
 Turning emergency charging on needs `--yes`, or y in the TUI.
 
+`raw` is for probing: it sends any action, message type (`--type`,
+default 4) and body, including reboot (45) and power off (46), and
+prints the unit's echo.  Nothing checks or confirms it.  Through a
+daemon it goes over the socket only.
+
 The unit takes one BLE connection, so one jackerymon holds it at a time
 (a lock in `/run/lock`), and while one does the phone app cannot
-connect.  If a daemon is running, `tui` and `set` find it and go
-through it; `--direct` connects to the unit instead, and `--daemon`
+connect.  If a daemon is running, `tui`, `set` and `raw` find it and
+go through it; `--direct` connects to the unit instead, and `--daemon`
 names a daemon by socket or URL (`http://host:9888/units/<serial>`).
 
 Commands other than `tui` log BLE recoveries to stderr; `RUST_LOG`
@@ -110,6 +116,7 @@ link back.  TCP's `/metrics` covers every unit, labeled `serial`;
 | `GET /series?since=…&every=…` | chart columns, averaged per interval; needs `--log-dir` | yes |
 | `GET /` | the web view: live status; power and battery charts (input by source), AC output voltage and frequency while it was on, and a strip of states (outputs on, power in and out, faults, no data); the unit's settings (read-only) | yes |
 | `POST /settings` | one setting, e.g. `{"lm":1}`; answers once applied | only with `--tcp-control` |
+| `POST /raw` | one command as given, e.g. `{"action":33,"type":22,"body":{"cl":60}}`; answers with the unit's echo, unconfirmed | never |
 
 ```sh
 curl -s --unix-socket $XDG_RUNTIME_DIR/jackerymon/<serial>.sock \

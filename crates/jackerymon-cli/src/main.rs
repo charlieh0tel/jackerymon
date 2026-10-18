@@ -6,6 +6,7 @@ mod daemon_client;
 mod key;
 mod names;
 mod poll;
+mod raw;
 mod record;
 mod runtime;
 mod scan;
@@ -27,6 +28,7 @@ use crate::daemon::DaemonArgs;
 use crate::daemon::log::CompressArgs;
 use crate::key::KeyArgs;
 use crate::poll::PollArgs;
+use crate::raw::RawArgs;
 use crate::scan::ScanArgs;
 use crate::set::SetArgs;
 use crate::tui::TuiArgs;
@@ -75,6 +77,9 @@ enum Command {
     Tui(TuiArgs),
     /// Change one setting and confirm it with a status read.
     Set(SetArgs),
+    /// Send one command as given and print the unit's echo; unchecked, so
+    /// it can reboot or power off the unit.
+    Raw(RawArgs),
     /// Gzip a daemon's finished daily logs; today's is left alone.
     CompressLogs(CompressArgs),
     /// Own the BLE connection; serve status, metrics, live updates, and
@@ -119,6 +124,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Scan(arguments) => scan::run(arguments).await,
         Command::Tui(arguments) => tui::run(arguments).await,
         Command::Set(arguments) => set::run(arguments).await,
+        Command::Raw(arguments) => raw::run(arguments).await,
         Command::Daemon(arguments) => daemon::run(arguments).await,
         Command::CompressLogs(arguments) => daemon::log::compress_logs(&arguments),
     }

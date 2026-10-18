@@ -29,8 +29,11 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::stream;
 use jackerymon::control::ControlError;
+use jackerymon::control::RawCommand;
+use jackerymon::control::RawError;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
+use jackerymon::poll::RawRequest;
 use jackerymon::poll::SettingRequest;
 use serde::Deserialize;
 use serde_json::Map;
@@ -39,12 +42,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task;
-use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::EVENT_KEEP_ALIVE;
+use super::RAW_PATH;
 use super::Unit;
 use super::log;
 use super::metrics;
@@ -55,8 +58,8 @@ use super::web;
 use super::web::View;
 use crate::record::Update;
 
-/// How long `POST /settings` waits, including for room in the queue and
-/// for the unit to come back.  A request still queued when this expires
+/// How long `POST /settings` and `POST /raw` wait, including for room in
+/// the queue and for the unit to come back.  A request still queued when this expires
 /// is never sent; one already sent may still take effect.
 const SETTING_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -109,11 +112,16 @@ fn unit_routes(prefix: &str, unit: Arc<Unit>, control: bool) -> Router {
     routes.with_state(unit)
 }
 
-/// A unit's own socket: its full API at the root, and `/units` listing
-/// it, as the page asks.
+/// A unit's own socket: its full API at the root, `/units` listing it,
+/// as the page asks, and `/raw`, which TCP never serves.
 pub(super) fn socket_router(unit: Arc<Unit>) -> Router {
     let listed = vec![Arc::clone(&unit)];
-    unit_routes("", unit, true).route(UNITS, get(move || unit_list(listed)))
+    let raw_route = Router::new()
+        .route(RAW_PATH, post(raw))
+        .with_state(Arc::clone(&unit));
+    unit_routes("", unit, true)
+        .route(UNITS, get(move || unit_list(listed)))
+        .merge(raw_route)
 }
 
 /// TCP: every unit under `/units/<serial>/`, `/units` listing them, all
@@ -400,10 +408,9 @@ async fn settings(
     }
     let (reply, answer) = oneshot::channel();
     let request = ControlRequest::Setting(SettingRequest { setting, reply });
-    let answered = submit(&unit, request, answer).await;
-    match answered {
-        Ok(Some(Ok(()))) => Json(json!({ "applied": setting.to_string() })).into_response(),
-        Ok(Some(Err(control))) => {
+    match submit(&unit, request, answer).await {
+        Ok(Ok(())) => Json(json!({ "applied": setting.to_string() })).into_response(),
+        Ok(Err(control)) => {
             let code = match control {
                 ControlError::Rejected { .. }
                 | ControlError::NotApplied(_)
@@ -412,27 +419,88 @@ async fn settings(
             };
             error(code, &control.to_string())
         }
-        Ok(None) => error(StatusCode::SERVICE_UNAVAILABLE, "not polling the unit"),
-        Err(_) => error(
-            StatusCode::GATEWAY_TIMEOUT,
-            &format!("{setting}: no answer within {SETTING_TIMEOUT:?}; not sent if still queued"),
-        ),
+        Err(unanswered) => unanswered.response(&setting.to_string()),
     }
 }
 
-/// Queues `request` for the poller and waits for `answer`: `Ok(None)`
-/// while the unit is not being polled, `Err` after [`SETTING_TIMEOUT`].
+/// Body of `POST /raw`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBody {
+    action: u8,
+    #[serde(rename = "type", default = "default_message_type")]
+    message_type: u8,
+    #[serde(default)]
+    body: Map<String, Value>,
+}
+
+fn default_message_type() -> u8 {
+    RawCommand::DEFAULT_MESSAGE_TYPE
+}
+
+/// Sends one command as given, such as `{"action":33,"type":22,
+/// "body":{"cl":60}}`, and answers with the unit's echo.  Nothing confirms
+/// it took effect.
+async fn raw(State(unit): State<Arc<Unit>>, Json(body): Json<RawBody>) -> Response {
+    let command = match RawCommand::new(body.action, body.message_type, body.body) {
+        Ok(command) => command,
+        Err(long) => return error(StatusCode::BAD_REQUEST, &long.to_string()),
+    };
+    let shown = command.to_string();
+    let (reply, answer) = oneshot::channel();
+    let request = ControlRequest::Raw(RawRequest { command, reply });
+    match submit(&unit, request, answer).await {
+        Ok(Ok(echo)) => Json(json!({ "echo": echo })).into_response(),
+        Ok(Err(raw)) => {
+            let code = match raw {
+                RawError::Rejected { .. } | RawError::InvalidReply { .. } => {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                }
+                RawError::Failed { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            error(code, &raw.to_string())
+        }
+        Err(unanswered) => unanswered.response(&shown),
+    }
+}
+
+/// Why a queued request has no answer.
+enum Unanswered {
+    NotPolling,
+    /// [`SETTING_TIMEOUT`] passed.
+    TimedOut,
+}
+
+impl Unanswered {
+    /// The error response for the request `what`.
+    fn response(self, what: &str) -> Response {
+        match self {
+            Self::NotPolling => error(StatusCode::SERVICE_UNAVAILABLE, "not polling the unit"),
+            Self::TimedOut => error(
+                StatusCode::GATEWAY_TIMEOUT,
+                &format!("{what}: no answer within {SETTING_TIMEOUT:?}; not sent if still queued"),
+            ),
+        }
+    }
+}
+
+/// Queues `request` for the poller and waits for `answer`.
 async fn submit<T>(
     unit: &Unit,
     request: ControlRequest,
     answer: oneshot::Receiver<T>,
-) -> Result<Option<T>, Elapsed> {
-    timeout(SETTING_TIMEOUT, async {
+) -> Result<T, Unanswered> {
+    let answered = timeout(SETTING_TIMEOUT, async {
         let commands = unit.commands.lock().expect("commands lock").clone();
         commands.send(request).await.ok()?;
         answer.await.ok()
     })
-    .await
+    .await;
+    match answered {
+        Ok(Some(answer)) => Ok(answer),
+        Ok(None) => Err(Unanswered::NotPolling),
+        Err(_) => Err(Unanswered::TimedOut),
+    }
 }
 
 fn parse_setting(body: &Map<String, Value>) -> Result<Setting, String> {
@@ -452,10 +520,17 @@ fn error(code: StatusCode, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use std::slice;
+    use std::sync::Arc;
+
     use axum::Json;
+    use axum::Router;
+    use axum::body::Body;
     use axum::extract::Query;
     use axum::extract::State;
+    use axum::http::Request;
     use axum::http::StatusCode;
+    use axum::http::header::CONTENT_TYPE;
     use jackerymon::control::Setting;
     use jackerymon::identity::ModelCode;
     use jackerymon::poll::ControlRequest;
@@ -464,11 +539,14 @@ mod tests {
     use serde_json::json;
     use tokio::sync::oneshot;
     use tokio::sync::watch;
+    use tower::ServiceExt;
 
     use super::SettingQuery;
     use super::author;
     use super::parse_setting;
     use super::settings;
+    use super::socket_router;
+    use super::tcp_router;
     use crate::daemon::COMMAND_BUFFER;
     use crate::daemon::Unit;
 
@@ -488,18 +566,66 @@ mod tests {
         assert!(parse(json!({"lm": 9})).is_err());
     }
 
-    /// With the unit away and the queue full, a request still times out
-    /// instead of waiting for room.
-    #[tokio::test(start_paused = true)]
-    async fn full_queue_counts_against_the_deadline() {
-        let (_halt, halting) = watch::channel(false);
+    const SERIAL: &str = "123456789";
+
+    /// A unit that is not being polled; dropping the sender stops it.
+    fn idle_unit() -> (Arc<Unit>, watch::Sender<bool>) {
+        let (halt, halting) = watch::channel(false);
         let unit = Unit::new(
-            "123456789".to_owned(),
+            SERIAL.to_owned(),
             ModelCode::EXPLORER_2000,
             None,
             None,
             halting,
         );
+        (unit, halt)
+    }
+
+    async fn post(router: Router, path: &str, body: serde_json::Value) -> StatusCode {
+        let request = Request::post(path)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request");
+        router.oneshot(request).await.expect("response").status()
+    }
+
+    #[tokio::test]
+    async fn raw_is_served_on_the_socket_only() {
+        let (unit, _halt) = idle_unit();
+        let command = json!({"action": 2, "type": 100});
+        let socket = post(socket_router(unit.clone()), "/raw", command.clone()).await;
+        assert_eq!(socket, StatusCode::SERVICE_UNAVAILABLE, "not polling");
+        for path in ["/raw", &format!("/units/{SERIAL}/raw")] {
+            let tcp = post(
+                tcp_router(slice::from_ref(&unit), true),
+                path,
+                command.clone(),
+            )
+            .await;
+            assert_eq!(tcp, StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_refuses_bodies_that_do_not_fit() {
+        let (unit, _halt) = idle_unit();
+        let long = json!({"action": 17, "body": {"k": "x".repeat(300)}});
+        assert_eq!(
+            post(socket_router(unit.clone()), "/raw", long).await,
+            StatusCode::BAD_REQUEST
+        );
+        let typo = json!({"action": 17, "kind": 4});
+        assert_eq!(
+            post(socket_router(unit), "/raw", typo).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+
+    /// With the unit away and the queue full, a request still times out
+    /// instead of waiting for room.
+    #[tokio::test(start_paused = true)]
+    async fn full_queue_counts_against_the_deadline() {
+        let (unit, _halt) = idle_unit();
         let _requests = unit.take_commands();
         let commands = unit.commands.lock().expect("commands lock").clone();
         let light = Setting::Light(LightMode::Low);

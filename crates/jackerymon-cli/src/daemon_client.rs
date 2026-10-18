@@ -14,11 +14,15 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
 use futures::StreamExt;
+use jackerymon::control::RawCommand;
 use jackerymon::control::Setting;
 use reqwest::StatusCode;
+use serde_json::Value;
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::daemon::EVENT_KEEP_ALIVE;
+use crate::daemon::RAW_PATH;
 use crate::record::Update;
 use crate::runtime;
 
@@ -26,8 +30,8 @@ use crate::runtime;
 const DAEMON_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long to wait for history at startup.
 const DAEMON_HISTORY_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long to wait for a setting: a little over the daemon's own limit,
-/// so its answer arrives first.
+/// How long to wait for a setting or raw command: a little over the
+/// daemon's own limit, so its answer arrives first.
 const DAEMON_SETTING_TIMEOUT: Duration = Duration::from_secs(70);
 /// Keep-alives the event stream may miss before it counts as dead.
 const MISSED_KEEP_ALIVES: u32 = 3;
@@ -282,24 +286,44 @@ impl DaemonClient {
     }
 
     pub(crate) async fn post_setting(&self, setting: Setting, confirm: bool) -> Result<(), String> {
+        let path = format!("/settings?confirm={confirm}");
+        self.post(&path, &setting.body(), &setting.to_string())
+            .await
+            .map(drop)
+    }
+
+    /// The unit's echo to `command`.
+    pub(crate) async fn post_raw(&self, command: &RawCommand) -> Result<Value, String> {
+        let body = json!({
+            "action": command.action(),
+            "type": command.message_type(),
+            "body": command.body(),
+        });
+        let answer = self.post(RAW_PATH, &body, &command.to_string()).await?;
+        Ok(answer["echo"].clone())
+    }
+
+    /// Posts `body` to `path` for the request `what`; returns the answer,
+    /// or the daemon's error.
+    async fn post(&self, path: &str, body: &Value, what: &str) -> Result<Value, String> {
         self.same_unit()
             .await
-            .map_err(|error| format!("{setting} not sent: {error:#}"))?;
+            .map_err(|error| format!("{what} not sent: {error:#}"))?;
         let response = self
             .client
-            .post(format!("{}/settings?confirm={confirm}", self.base))
+            .post(format!("{}{path}", self.base))
             .timeout(DAEMON_SETTING_TIMEOUT)
-            .json(&setting.body())
+            .json(body)
             .send()
             .await
-            .map_err(|error| format!("{setting}: daemon unreachable: {error}"))?;
-        if response.status().is_success() {
-            return Ok(());
-        }
+            .map_err(|error| format!("{what}: daemon unreachable: {error}"))?;
         let status = response.status();
-        let body: serde_json::Value = response.json().await.unwrap_or_default();
-        Err(body["error"].as_str().map_or_else(
-            || format!("{setting}: daemon answered {status}"),
+        let answer: Value = response.json().await.unwrap_or_default();
+        if status.is_success() {
+            return Ok(answer);
+        }
+        Err(answer["error"].as_str().map_or_else(
+            || format!("{what}: daemon answered {status}"),
             str::to_owned,
         ))
     }

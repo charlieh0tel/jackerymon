@@ -318,7 +318,8 @@ key (`PortableControlFormat.java`, `lc/a.java`, `cmd/portable/b.java`):
 | 31 | `dt` or `bpc` | discharge stop % (app slider 10-90), or backup reserve % |
 | 32 | `en` | working mode, as the `en` key |
 
-Some actions take another message type (`cmd/portable/b.java`):
+Some actions take another message type (`cmd/portable/b.java`);
+`jackerymon raw <action> [body] --type <type>` sends any of them:
 
 | Action | Type | Body |
 |---|---|---|

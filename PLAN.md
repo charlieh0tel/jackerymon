@@ -97,8 +97,15 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   request whose requester has gone is not sent.
 - **Control scope.**  AC/DC outputs, light, screen, auto-off and
   energy-saving timers, charge speed, battery protection, emergency
-  charge, and UPS mode.  Reboot and power-off cannot be sent.  No custom
-  charge power: model 12 acknowledges it without applying it.  A
+  charge, and UPS mode.  No setting can reboot or power off the unit.
+  No custom charge power: model 12 acknowledges it without applying it.
+- **Raw commands for probing (2026-10-17).**  `raw` sends any action,
+  message type and body, and answers with the unit's echo; nothing
+  confirms it, as nothing knows what it should change.  No blocklist,
+  reboot and power-off included: probing the app's commands needs every
+  action.  Over the socket only, never TCP, even with `--tcp-control`:
+  a listener on the LAN would let anyone power a unit off.  An empty
+  body goes out as none, as the app sends `{}` on these frames.  A
   setting for a control the model lacks is refused before it is sent,
   and the TUI menu and the web view leave that control out: the
   Explorer 3000 has no light, and acknowledges a light setting it then
@@ -197,7 +204,7 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   check, so `--tcp-control` brings back the accepted risks: DNS
   rebinding lets a web page on the daemon's host change settings, and a
   remote listener exposes control.  Without it, TCP exposes telemetry
-  only.
+  only.  Raw commands are never on TCP.
 
 ### Packaging
 

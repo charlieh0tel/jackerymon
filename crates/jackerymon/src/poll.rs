@@ -7,7 +7,8 @@
 //! Setting changes arrive on a channel and run between queries, never
 //! during one.  Each counts as applied only once a status read shows it.
 //! If the link drops first, the change may still have taken effect, so
-//! the first status after reconnecting decides.
+//! the first status after reconnecting decides.  Raw commands share the
+//! channel and are answered with the unit's echo, unconfirmed.
 
 use std::future::Future;
 use std::future::pending;
@@ -26,6 +27,8 @@ use tokio::time::sleep;
 
 use crate::ble::BleError;
 use crate::control::ControlError;
+use crate::control::RawCommand;
+use crate::control::RawError;
 use crate::control::Setting;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
@@ -65,10 +68,19 @@ pub struct SettingRequest {
     pub reply: oneshot::Sender<Result<(), ControlError>>,
 }
 
+/// A raw command for the poller to send, answered on `reply` with the
+/// unit's echo.
+#[derive(Debug)]
+pub struct RawRequest {
+    pub command: RawCommand,
+    pub reply: oneshot::Sender<Result<Value, RawError>>,
+}
+
 /// Work for the poller, run between status reads.
 #[derive(Debug)]
 pub enum ControlRequest {
     Setting(SettingRequest),
+    Raw(RawRequest),
 }
 
 /// Where setting changes come from; `None` when the caller has none.
@@ -297,6 +309,7 @@ async fn serve<L: Link>(
                             }
                             apply(link, config, request, counters, on_event, unverified).await?
                         }
+                        ControlRequest::Raw(request) => send_raw(link, config, request).await?,
                     };
                     if flow.is_break() {
                         return Ok(ControlFlow::Break(()));
@@ -392,11 +405,46 @@ async fn apply<L: Link>(
     unreachable!("the last attempt answers")
 }
 
+/// Sends one raw command and answers with the unit's echo; nothing
+/// confirms it.  A rejection or invalid JSON is answered and polling goes
+/// on.  Any other failure is answered and returned, so the link
+/// reconnects or polling stops.
+async fn send_raw<L: Link>(
+    link: &mut L,
+    config: PollConfig,
+    request: RawRequest,
+) -> Result<ControlFlow<()>, BleError> {
+    if request.reply.is_closed() {
+        return Ok(ControlFlow::Continue(()));
+    }
+    let command = request.command;
+    let result = match link.exchange(&command.request(), config.timeout).await {
+        Ok(echo) => Ok(echo),
+        Err(BleError::Decode(DecodeError::Device { code, .. })) => {
+            Err(RawError::Rejected { command, code })
+        }
+        Err(BleError::Decode(DecodeError::Json(error))) => Err(RawError::InvalidReply {
+            command,
+            error: error.to_string(),
+        }),
+        Err(error) => {
+            let failed = RawError::Failed {
+                command,
+                error: error.to_string(),
+            };
+            answer(request.reply, Err(failed));
+            return Err(error);
+        }
+    };
+    answer(request.reply, result);
+    Ok(ControlFlow::Continue(()))
+}
+
 fn applied(setting: Setting, status: &RawStatus) -> bool {
     Status::try_from(status.clone()).is_ok_and(|status| setting.applied(&status))
 }
 
-fn answer(reply: oneshot::Sender<Result<(), ControlError>>, result: Result<(), ControlError>) {
+fn answer<T>(reply: oneshot::Sender<T>, result: T) {
     // The requester may have given up; polling goes on regardless.
     reply.send(result).ok();
 }
@@ -423,10 +471,13 @@ mod tests {
     use super::PollConfig;
     use super::PollError;
     use super::PollEvent;
+    use super::RawRequest;
     use super::SettingRequest;
     use super::poll_with;
     use crate::ble::BleError;
     use crate::control::ControlError;
+    use crate::control::RawCommand;
+    use crate::control::RawError;
     use crate::control::Setting;
     use crate::frame::DecodeError;
     use crate::frame::Request;
@@ -721,17 +772,27 @@ mod tests {
         setting: Setting,
         samples: u64,
     ) -> (Result<(), ControlError>, Vec<u8>, Result<(), PollError>) {
+        let (reply, answer) = oneshot::channel();
+        let request = ControlRequest::Setting(SettingRequest { setting, reply });
+        let (actions, result) = queued(model, steps, request, samples).await;
+        (answer.await.expect("answered"), actions, result)
+    }
+
+    /// Polls a unit of `model` with `request` queued until `samples`
+    /// samples; returns the actions sent and the poll result.
+    async fn queued(
+        model: ModelCode,
+        steps: Vec<Step>,
+        request: ControlRequest,
+        samples: u64,
+    ) -> (Vec<u8>, Result<(), PollError>) {
         let script = Script {
             model: Some(model),
             ..Script::default()
         };
         script.steps.borrow_mut().extend(steps);
         let (sender, receiver) = mpsc::channel(1);
-        let (reply, answer) = oneshot::channel();
-        sender
-            .send(ControlRequest::Setting(SettingRequest { setting, reply }))
-            .await
-            .expect("queued");
+        sender.send(request).await.expect("queued");
         let result = poll_with(
             script.clone(),
             config(),
@@ -744,7 +805,30 @@ mod tests {
         )
         .await;
         let actions = script.actions.borrow().clone();
+        (actions, result)
+    }
+
+    /// Sends one raw command for action 33 between status reads; returns
+    /// the reply, the actions sent, and the poll result.
+    async fn raw(
+        steps: Vec<Step>,
+        samples: u64,
+    ) -> (
+        Result<serde_json::Value, RawError>,
+        Vec<u8>,
+        Result<(), PollError>,
+    ) {
+        let (reply, answer) = oneshot::channel();
+        let request = ControlRequest::Raw(RawRequest {
+            command: raw_command(),
+            reply,
+        });
+        let (actions, result) = queued(ModelCode::EXPLORER_2000, steps, request, samples).await;
         (answer.await.expect("answered"), actions, result)
+    }
+
+    fn raw_command() -> RawCommand {
+        RawCommand::new(33, 22, serde_json::Map::new()).expect("fits")
     }
 
     const LIGHT: Setting = Setting::Light(LightMode::Low);
@@ -858,6 +942,45 @@ mod tests {
         .await;
         assert!(matches!(reply, Err(ControlError::Transport { .. })));
         assert!(matches!(result, Err(PollError::TooManyFailures { .. })));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_command_returns_the_echo_unverified() {
+        let (reply, actions, result) =
+            raw(vec![Step::Status(100), Step::Light(1), Step::Status(99)], 2).await;
+        assert_eq!(reply, Ok(json!({"lm": 1})));
+        assert_eq!(actions, [6, 33, 6]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_rejection_is_answered_and_polling_continues() {
+        let (reply, actions, result) = raw(
+            vec![Step::Status(100), Step::Reject(4), Step::Status(99)],
+            2,
+        )
+        .await;
+        assert_eq!(
+            reply,
+            Err(RawError::Rejected {
+                command: raw_command(),
+                code: 4
+            })
+        );
+        assert_eq!(actions, [6, 33, 6]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_link_failure_is_answered_and_reconnects() {
+        let (reply, actions, result) = raw(
+            vec![Step::Status(100), Step::QueryFails, Step::Status(99)],
+            2,
+        )
+        .await;
+        assert!(matches!(reply, Err(RawError::Failed { .. })));
+        assert_eq!(actions, [6, 33, 6]);
+        assert!(result.is_ok());
     }
 
     #[tokio::test(start_paused = true)]
