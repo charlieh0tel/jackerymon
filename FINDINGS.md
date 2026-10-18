@@ -566,6 +566,14 @@ Explorer 3000, HomePower 3000) rejected that request with code 4,
 with an empty body as the app sends it and with `{}`, so no firmware
 was fetched.
 
+Guessed lists posted to `device/ota/version/list` as `{"list":[...]}`
+(items of `deviceSn` with `version`, `currentVersion`, `status` or
+`MAIN`, at the current version, 1.0 and 0.1) all returned code 10600
+with an empty message.  The headers match the app's, so the body is
+what the server refuses.  The app's network security config trusts
+user certificates and the app pins none, so a proxy on the phone can
+show the real list and any image links.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
