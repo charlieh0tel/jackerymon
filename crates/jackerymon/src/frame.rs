@@ -54,7 +54,7 @@ pub enum DecodeError {
     InconsistentPagination,
     #[error("conflicting duplicate BLE page")]
     ConflictingPage,
-    #[error("invalid status JSON: {0}")]
+    #[error("invalid response JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("expected a JSON object in BLE response")]
     NotObject,
@@ -158,9 +158,10 @@ impl ResponseDecoder {
     }
 
     /// Feeds one notification.  Returns the JSON body once the response
-    /// is complete.  Fails on a wrong key, corruption, inconsistent pages,
-    /// a device result code, or a body that is not a JSON object.
-    pub(crate) fn feed(&mut self, fragment: &[u8]) -> Result<Option<RawStatus>, DecodeError> {
+    /// is complete, `null` for an empty one.  Fails on a wrong key,
+    /// corruption, inconsistent pages, a device result code, or a body
+    /// that is not JSON.
+    pub(crate) fn feed(&mut self, fragment: &[u8]) -> Result<Option<Value>, DecodeError> {
         self.received += fragment.len();
         if self.received > MAX_RESPONSE_BYTES {
             return Err(DecodeError::TooLarge);
@@ -209,7 +210,7 @@ impl ResponseDecoder {
             } else {
                 body.to_vec()
             };
-            return parse_object(&body).map(Some);
+            return parse_body(&body).map(Some);
         }
         Ok(None)
     }
@@ -246,11 +247,17 @@ impl ResponseDecoder {
     }
 }
 
-fn parse_object(body: &[u8]) -> Result<RawStatus, DecodeError> {
+fn parse_body(body: &[u8]) -> Result<Value, DecodeError> {
     if body.is_empty() {
-        return Ok(RawStatus::new());
+        return Ok(Value::Null);
     }
-    match serde_json::from_slice(body)? {
+    Ok(serde_json::from_slice(body)?)
+}
+
+/// A status response's body as its fields; an empty body has none.
+pub(crate) fn status_fields(body: Value) -> Result<RawStatus, DecodeError> {
+    match body {
+        Value::Null => Ok(RawStatus::new()),
         Value::Object(status) => Ok(status),
         _ => Err(DecodeError::NotObject),
     }
@@ -269,6 +276,7 @@ mod tests {
     use super::RawStatus;
     use super::Request;
     use super::ResponseDecoder;
+    use super::status_fields;
     use crate::cipher::crc16;
     use crate::cipher::rc4;
     use crate::identity::BleKey;
@@ -300,10 +308,6 @@ mod tests {
             .chain([MASK])
             .collect();
         rc4(&[wrapped.clone(), crc16(&wrapped).to_vec()].concat(), KEY)
-    }
-
-    fn status(value: serde_json::Value) -> RawStatus {
-        value.as_object().expect("object").clone()
     }
 
     #[test]
@@ -347,7 +351,7 @@ mod tests {
         let rest = [&second[3..], &first[..]].concat();
         assert_eq!(
             decoder.feed(&rest).expect("complete"),
-            Some(status(json!({"rb": 100})))
+            Some(json!({"rb": 100}))
         );
     }
 
@@ -361,9 +365,11 @@ mod tests {
         other = rc4(&[wrapped, crc.to_vec()].concat(), KEY);
         let mut decoder = status_decoder(key());
         assert!(decoder.feed(&other).expect("skipped").is_none());
+        let empty = decoder.feed(&response(b"", None, 0)).expect("empty");
+        assert_eq!(empty, Some(serde_json::Value::Null));
         assert_eq!(
-            decoder.feed(&response(b"", None, 0)).expect("empty"),
-            Some(RawStatus::new())
+            status_fields(empty.expect("body")).expect("fields"),
+            RawStatus::new()
         );
     }
 
@@ -417,9 +423,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_object_and_oversize() {
+    fn status_rejects_non_object_and_oversize() {
+        let list = status_decoder(key())
+            .feed(&response(b"[1]", None, 0))
+            .expect("JSON");
+        assert_eq!(list, Some(json!([1])));
         assert!(matches!(
-            status_decoder(key()).feed(&response(b"[1]", None, 0)),
+            status_fields(list.expect("body")),
             Err(DecodeError::NotObject)
         ));
         let mut decoder = status_decoder(key());
