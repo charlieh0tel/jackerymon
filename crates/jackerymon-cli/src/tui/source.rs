@@ -11,6 +11,7 @@ use jackerymon::ble;
 use jackerymon::control::Setting;
 use jackerymon::identity::ModelCode;
 use jackerymon::poll::ControlRequest;
+use jackerymon::poll::SettingRequest;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -92,10 +93,10 @@ pub(super) async fn direct(connection: &ConnectionArgs) -> Result<Source> {
     let forward = async move {
         while let Some(command) = asked.recv().await {
             let (reply, answer) = oneshot::channel();
-            let request = ControlRequest {
+            let request = ControlRequest::Setting(SettingRequest {
                 setting: command.setting,
                 reply,
-            };
+            });
             let result = match requests.send(request).await {
                 Ok(()) => match answer.await {
                     Ok(result) => result.map_err(|error| error.to_string()),

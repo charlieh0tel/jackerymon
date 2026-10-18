@@ -17,6 +17,7 @@ use std::pin::pin;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -29,6 +30,7 @@ use crate::control::Setting;
 use crate::frame::DecodeError;
 use crate::frame::RawStatus;
 use crate::frame::Request;
+use crate::frame::status_fields;
 use crate::identity::ModelCode;
 use crate::status::Status;
 
@@ -58,9 +60,15 @@ pub struct PollConfig {
 
 /// A setting change for the poller to apply, answered on `reply`.
 #[derive(Debug)]
-pub struct ControlRequest {
+pub struct SettingRequest {
     pub setting: Setting,
     pub reply: oneshot::Sender<Result<(), ControlError>>,
+}
+
+/// Work for the poller, run between status reads.
+#[derive(Debug)]
+pub enum ControlRequest {
+    Setting(SettingRequest),
 }
 
 /// Where setting changes come from; `None` when the caller has none.
@@ -121,12 +129,9 @@ pub(crate) trait Connector {
 
 /// One open connection to the unit.
 pub(crate) trait Link {
-    /// Sends `request` and returns the JSON body of its response.
-    async fn exchange(
-        &mut self,
-        request: &Request,
-        timeout: Duration,
-    ) -> Result<RawStatus, BleError>;
+    /// Sends `request` and returns the JSON body of its response, `null`
+    /// when it has none.
+    async fn exchange(&mut self, request: &Request, timeout: Duration) -> Result<Value, BleError>;
 
     /// Waits `duration`, failing early if the unit disconnects.
     async fn idle(&mut self, duration: Duration) -> Result<(), BleError>;
@@ -185,7 +190,7 @@ async fn poll_loop<C: Connector>(
     commands: &mut Commands,
     stop: impl Future<Output = ()>,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
-    unverified: &mut Option<ControlRequest>,
+    unverified: &mut Option<SettingRequest>,
 ) -> Result<(), PollError> {
     let mut stop = pin!(stop);
     let mut counters = Counters::default();
@@ -258,11 +263,11 @@ async fn serve<L: Link>(
     commands: &mut Commands,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
-    unverified: &mut Option<ControlRequest>,
+    unverified: &mut Option<SettingRequest>,
 ) -> Result<ControlFlow<()>, BleError> {
     loop {
         let started = Instant::now();
-        let status = link.exchange(&Request::status(), config.timeout).await?;
+        let status = read_status(link, config.timeout).await?;
         if let Some(request) = unverified.take() {
             let setting = request.setting;
             let result = if applied(setting, &status) {
@@ -283,12 +288,17 @@ async fn serve<L: Link>(
                     break;
                 }
                 Some(request) = next_command(commands) => {
-                    let setting = request.setting;
-                    if !setting.available_on(model) {
-                        answer(request.reply, Err(ControlError::Unavailable { setting, model }));
-                        continue;
-                    }
-                    if apply(link, config, request, counters, on_event, unverified).await?.is_break() {
+                    let flow = match request {
+                        ControlRequest::Setting(request) => {
+                            let setting = request.setting;
+                            if !setting.available_on(model) {
+                                answer(request.reply, Err(ControlError::Unavailable { setting, model }));
+                                continue;
+                            }
+                            apply(link, config, request, counters, on_event, unverified).await?
+                        }
+                    };
+                    if flow.is_break() {
                         return Ok(ControlFlow::Break(()));
                     }
                 }
@@ -302,6 +312,12 @@ async fn next_command(commands: &mut Commands) -> Option<ControlRequest> {
         Some(receiver) => receiver.recv().await,
         None => pending().await,
     }
+}
+
+/// Reads the unit's status.
+async fn read_status<L: Link>(link: &mut L, timeout: Duration) -> Result<RawStatus, BleError> {
+    let body = link.exchange(&Request::status(), timeout).await?;
+    Ok(status_fields(body)?)
 }
 
 /// Reports one status response as a sample.
@@ -330,10 +346,10 @@ fn record(
 async fn apply<L: Link>(
     link: &mut L,
     config: PollConfig,
-    request: ControlRequest,
+    request: SettingRequest,
     counters: &mut Counters,
     on_event: &mut impl FnMut(PollEvent) -> ControlFlow<()>,
-    unverified: &mut Option<ControlRequest>,
+    unverified: &mut Option<SettingRequest>,
 ) -> Result<ControlFlow<()>, BleError> {
     let setting = request.setting;
     // A requester that gave up, such as a timed-out HTTP client, must not
@@ -354,7 +370,7 @@ async fn apply<L: Link>(
     }
     for attempt in 1..=VERIFY_ATTEMPTS {
         let started = Instant::now();
-        let status = match link.exchange(&Request::status(), config.timeout).await {
+        let status = match read_status(link, config.timeout).await {
             Ok(status) => status,
             Err(error) => {
                 *unverified = Some(request);
@@ -395,6 +411,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
+    use serde_json::Value;
     use serde_json::json;
 
     use tokio::sync::mpsc;
@@ -406,12 +423,12 @@ mod tests {
     use super::PollConfig;
     use super::PollError;
     use super::PollEvent;
+    use super::SettingRequest;
     use super::poll_with;
     use crate::ble::BleError;
     use crate::control::ControlError;
     use crate::control::Setting;
     use crate::frame::DecodeError;
-    use crate::frame::RawStatus;
     use crate::frame::Request;
     use crate::identity::ModelCode;
     use crate::status::LightMode;
@@ -488,15 +505,13 @@ mod tests {
             &mut self,
             request: &Request,
             _timeout: Duration,
-        ) -> Result<RawStatus, BleError> {
+        ) -> Result<Value, BleError> {
             self.script.actions.borrow_mut().push(request.action.0);
             let step = self.script.steps.borrow_mut().pop_front();
             match step {
                 Some(Step::Status(battery)) => Ok(status(battery)),
-                Some(Step::Light(mode)) => {
-                    Ok(json!({"lm": mode}).as_object().expect("object").clone())
-                }
-                Some(Step::Ack) => Ok(RawStatus::new()),
+                Some(Step::Light(mode)) => Ok(json!({"lm": mode})),
+                Some(Step::Ack) => Ok(Value::Null),
                 Some(Step::Reject(code)) => Err(BleError::Decode(DecodeError::Device {
                     action: request.action.0,
                     code,
@@ -524,8 +539,8 @@ mod tests {
         }
     }
 
-    fn status(battery: i64) -> RawStatus {
-        json!({"rb": battery}).as_object().expect("object").clone()
+    fn status(battery: i64) -> Value {
+        json!({"rb": battery})
     }
 
     fn config() -> PollConfig {
@@ -714,7 +729,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel(1);
         let (reply, answer) = oneshot::channel();
         sender
-            .send(ControlRequest { setting, reply })
+            .send(ControlRequest::Setting(SettingRequest { setting, reply }))
             .await
             .expect("queued");
         let result = poll_with(
@@ -856,10 +871,10 @@ mod tests {
         let (reply, answer) = oneshot::channel();
         drop(answer);
         sender
-            .send(ControlRequest {
+            .send(ControlRequest::Setting(SettingRequest {
                 setting: LIGHT,
                 reply,
-            })
+            }))
             .await
             .expect("queued");
         let result = poll_with(

@@ -31,6 +31,7 @@ use futures::stream;
 use jackerymon::control::ControlError;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
+use jackerymon::poll::SettingRequest;
 use serde::Deserialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -38,6 +39,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task;
+use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -397,16 +399,8 @@ async fn settings(
         );
     }
     let (reply, answer) = oneshot::channel();
-    // `None` while the unit is not being polled.
-    let answered = timeout(SETTING_TIMEOUT, async {
-        let commands = unit.commands.lock().expect("commands lock").clone();
-        commands
-            .send(ControlRequest { setting, reply })
-            .await
-            .ok()?;
-        answer.await.ok()
-    })
-    .await;
+    let request = ControlRequest::Setting(SettingRequest { setting, reply });
+    let answered = submit(&unit, request, answer).await;
     match answered {
         Ok(Some(Ok(()))) => Json(json!({ "applied": setting.to_string() })).into_response(),
         Ok(Some(Err(control))) => {
@@ -424,6 +418,21 @@ async fn settings(
             &format!("{setting}: no answer within {SETTING_TIMEOUT:?}; not sent if still queued"),
         ),
     }
+}
+
+/// Queues `request` for the poller and waits for `answer`: `Ok(None)`
+/// while the unit is not being polled, `Err` after [`SETTING_TIMEOUT`].
+async fn submit<T>(
+    unit: &Unit,
+    request: ControlRequest,
+    answer: oneshot::Receiver<T>,
+) -> Result<Option<T>, Elapsed> {
+    timeout(SETTING_TIMEOUT, async {
+        let commands = unit.commands.lock().expect("commands lock").clone();
+        commands.send(request).await.ok()?;
+        answer.await.ok()
+    })
+    .await
 }
 
 fn parse_setting(body: &Map<String, Value>) -> Result<Setting, String> {
@@ -450,6 +459,7 @@ mod tests {
     use jackerymon::control::Setting;
     use jackerymon::identity::ModelCode;
     use jackerymon::poll::ControlRequest;
+    use jackerymon::poll::SettingRequest;
     use jackerymon::status::LightMode;
     use serde_json::json;
     use tokio::sync::oneshot;
@@ -496,10 +506,10 @@ mod tests {
         for _ in 0..COMMAND_BUFFER {
             let (reply, _) = oneshot::channel();
             commands
-                .try_send(ControlRequest {
+                .try_send(ControlRequest::Setting(SettingRequest {
                     setting: light,
                     reply,
-                })
+                }))
                 .expect("room");
         }
         let response = settings(

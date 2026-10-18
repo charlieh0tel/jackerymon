@@ -28,6 +28,7 @@ use futures::StreamExt;
 use log::debug;
 use log::info;
 use log::warn;
+use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -37,7 +38,6 @@ use uuid::Uuid;
 use crate::advertisement;
 use crate::advertisement::Advertisement;
 use crate::frame::DecodeError;
-use crate::frame::RawStatus;
 use crate::frame::Request;
 use crate::frame::ResponseDecoder;
 use crate::identity::BleKey;
@@ -570,11 +570,7 @@ struct Connection {
 }
 
 impl Link for Connection {
-    async fn exchange(
-        &mut self,
-        request: &Request,
-        limit: Duration,
-    ) -> Result<RawStatus, BleError> {
+    async fn exchange(&mut self, request: &Request, limit: Duration) -> Result<Value, BleError> {
         let mut decoder = ResponseDecoder::new(self.key.clone(), request.action);
         let mask = NonZeroU8::new(rand::random_range(1..=u8::MAX)).expect("mask is nonzero");
         let write = CharacteristicWriteRequest {
@@ -593,8 +589,8 @@ impl Link for Connection {
                 tokio::select! {
                     notification = self.notifications.next() => {
                         let notification = notification.ok_or(BleError::Disconnected)?;
-                        if let Some(status) = decoder.feed(&notification)? {
-                            return Ok(status);
+                        if let Some(body) = decoder.feed(&notification)? {
+                            return Ok(body);
                         }
                     }
                     event = self.events.next() => {

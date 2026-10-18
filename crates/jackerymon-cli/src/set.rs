@@ -1,5 +1,6 @@
 //! `jackerymon set`: change one setting and confirm it took effect.
 
+use std::fmt;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 
@@ -13,6 +14,7 @@ use jackerymon::ble;
 use jackerymon::control::OFF_TIMER_CHOICES;
 use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
+use jackerymon::poll::SettingRequest;
 use jackerymon::status::BatteryProtection;
 use jackerymon::status::ChargeSpeed;
 use jackerymon::status::LightMode;
@@ -205,15 +207,26 @@ pub(crate) async fn run(arguments: SetArgs) -> Result<()> {
         println!("ok: {setting}");
         return Ok(());
     }
-    let (key_file, _lock) = arguments.connection.claim(KeyHome::User)?;
-    let config = arguments.connection.poll_config(Some(MAX_FAILURES));
+    let (reply, answer) = oneshot::channel();
+    let request = ControlRequest::Setting(SettingRequest { setting, reply });
+    direct(&arguments.connection, request, answer, &setting).await??;
+    println!("ok: {setting}");
+    Ok(())
+}
+
+/// Connects to the unit, has the poller run `request`, and returns its
+/// `answer`.  Fails if polling ends first.
+pub(crate) async fn direct<T>(
+    connection: &ConnectionArgs,
+    request: ControlRequest,
+    answer: oneshot::Receiver<T>,
+    what: &dyn fmt::Display,
+) -> Result<T> {
+    let (key_file, _lock) = connection.claim(KeyHome::User)?;
+    let config = connection.poll_config(Some(MAX_FAILURES));
     let adapter = ble::default_adapter().await?;
     let (sender, commands) = mpsc::channel(1);
-    let (reply, answer) = oneshot::channel();
-    sender
-        .send(ControlRequest { setting, reply })
-        .await
-        .context("queuing the setting")?;
+    sender.send(request).await.context("queuing the request")?;
     let mut answered = None;
     let stop = async {
         // A dropped reply means polling ended first; its error says why.
@@ -224,14 +237,10 @@ pub(crate) async fn run(arguments: SetArgs) -> Result<()> {
     })
     .await;
     match answered {
-        Some(result) => {
-            result?;
-            println!("ok: {setting}");
-            Ok(())
-        }
+        Some(result) => Ok(result),
         None => {
             polled.context("polling failed")?;
-            bail!("polling ended before {setting} was applied")
+            bail!("polling ended before {what} was answered")
         }
     }
 }
