@@ -130,7 +130,7 @@ Direct GATT connection succeeds with no pairing/bonding.
 |---|---|---|---|
 | `0000bdee-0000-1000-8000-00805f9b34fb` | `0000ee01-...` | write-without-response | command in |
 | `0000bdee-...` | `0000ee02-...` | notify | response out |
-| `0000bdff-...` | `0000ff01-...` | write-without-response | unknown (OTA/Wi-Fi?) |
+| `0000bdff-...` | `0000ff01-...` | write-without-response | unknown; unused by the app, descriptor unreadable (FINDINGS.md) |
 
 MTU negotiates to 23 by default (20-byte payloads); large responses are
 fragmented and must be reassembled.

@@ -73,7 +73,7 @@ bonding.  GATT layout:
 |---|---|---|---|
 | `0000bdee-...` | `0000ee01-...` | write-without-response | commands in |
 | `0000bdee-...` | `0000ee02-...` | notify | responses out |
-| `0000bdff-...` | `0000ff01-...` | write-without-response | unknown (OTA/Wi-Fi?) |
+| `0000bdff-...` | `0000ff01-...` | write-without-response | unknown; unused by the app |
 
 On first connect the unit pushed one unsolicited ~19-byte notify frame,
 then went quiet; a later session got nothing unprompted.
@@ -545,7 +545,9 @@ status read.  Its baseline was `en=0 dt=10 cs=1 lps=1`.
   not 4, so this probe was malformed.  Following the app's order,
   `lps=2` on action 22 was refused (the echo held 1), and action 33 on
   message type 22 was rejected with code 4.  The custom range is not
-  available on this unit over BLE.
+  available on this unit over BLE.  The HomePower 3000 (at 68%, no
+  input, `lps=0`) took `lps=2` as 1, eco, and rejected the range with
+  code 4 too; `lps=0` restored it.
 
 The app's battery setting has three values, not two: `lps` 2 is a
 custom range from `dl` to `cl`, and `cl` is a charge ceiling.  Charge
@@ -574,6 +576,9 @@ was fetched.
 - Does the decoded advertisement battery byte match the unit? The APK
   parser exposes it and both the live advertisement and GATT status
   reported 100; comparison with the display remains outstanding.
-- What is on service `0xbdff` / char `0xff01`?  Untested.
-- Does a charge plan (`en` 1) start or stop AC charging?  Does the
-  HomePower 3000 take the custom range the Explorer 3000 refuses?
+- What is on service `0xbdff` / char `0xff01`?  Every unit has it.
+  The characteristic is write-without-response only, with no notify;
+  its one descriptor, a 0x2901 user description, refuses reads.  The
+  app never refers to it: it uses only `0xbdee`.  Not written to,
+  since nothing would report the effect.
+- Does a charge plan (`en` 1) start or stop AC charging?
