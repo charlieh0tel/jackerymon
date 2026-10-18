@@ -42,6 +42,7 @@ workspace = true
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["test-util"] }
+tower = { version = "0.5.3", features = ["util"] }
 
 [package.metadata.deb]
 name = "jackerymon"

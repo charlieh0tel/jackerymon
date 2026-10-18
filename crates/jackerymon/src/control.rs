@@ -1,9 +1,11 @@
 //! Settings the unit accepts over BLE.  See `docs/protocol.md`, Control.
 //!
-//! Only decoded settings can be expressed; reboot and power off cannot.
+//! A [`Setting`] is a decoded control and cannot reboot or power off the
+//! unit.  A [`RawCommand`] sends anything, unchecked, for probing.
 
 use std::fmt;
 
+use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use thiserror::Error;
@@ -59,6 +61,106 @@ pub enum ControlError {
     /// Never sent: the unit's model has no such control.
     #[error("{setting}: model {model} has no such control")]
     Unavailable { setting: Setting, model: ModelCode },
+}
+
+/// A request sent as given, for actions this crate does not decode.
+/// Nothing checks what it does: it can reboot or power off the unit, or
+/// start a firmware update.  The unit's echo is returned unread, and no
+/// status read confirms it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawCommand {
+    action: u8,
+    message_type: u8,
+    /// Sent as JSON; an empty object is sent as no body, as the app does.
+    body: Map<String, Value>,
+}
+
+/// A raw body too long for the one-byte length of a request frame.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error(
+    "raw body is {length} bytes; a request frame carries at most {}",
+    u8::MAX
+)]
+pub struct BodyTooLong {
+    pub length: usize,
+}
+
+/// Why a raw command has no echo.
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum RawError {
+    #[error("unit rejected {command} with code {code}")]
+    Rejected { command: RawCommand, code: u8 },
+    #[error("unit answered {command} with invalid JSON: {error}")]
+    InvalidReply { command: RawCommand, error: String },
+    /// The link failed, or the reply could not be decoded.
+    #[error("sending {command} failed: {error}")]
+    Failed { command: RawCommand, error: String },
+}
+
+impl RawCommand {
+    /// The message type of every [`Setting`].
+    pub const DEFAULT_MESSAGE_TYPE: u8 = PROPERTY_CHANGE.0;
+
+    /// Fails if `body` does not fit one request frame.
+    pub fn new(
+        action: u8,
+        message_type: u8,
+        body: Map<String, Value>,
+    ) -> Result<Self, BodyTooLong> {
+        let command = Self {
+            action,
+            message_type,
+            body,
+        };
+        let length = command.encoded_body().len();
+        if u8::try_from(length).is_err() {
+            return Err(BodyTooLong { length });
+        }
+        Ok(command)
+    }
+
+    #[must_use]
+    pub fn action(&self) -> u8 {
+        self.action
+    }
+
+    #[must_use]
+    pub fn message_type(&self) -> u8 {
+        self.message_type
+    }
+
+    #[must_use]
+    pub fn body(&self) -> &Map<String, Value> {
+        &self.body
+    }
+
+    pub(crate) fn request(&self) -> Request {
+        Request {
+            action: Action(self.action),
+            message_type: MessageType(self.message_type),
+            body: self.encoded_body(),
+        }
+    }
+
+    fn encoded_body(&self) -> Vec<u8> {
+        // `PortableControlFormat.e`: `{}` goes out as no body.
+        if self.body.is_empty() {
+            return Vec::new();
+        }
+        Value::Object(self.body.clone()).to_string().into_bytes()
+    }
+}
+
+impl fmt::Display for RawCommand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "raw {}/{} {}",
+            self.action,
+            self.message_type,
+            Value::Object(self.body.clone())
+        )
+    }
 }
 
 impl Setting {
@@ -187,6 +289,8 @@ mod tests {
 
     use serde_json::json;
 
+    use super::BodyTooLong;
+    use super::RawCommand;
     use super::Setting;
     use crate::cipher::rc4;
     use crate::identity::BleKey;
@@ -264,6 +368,38 @@ mod tests {
         ] {
             assert_eq!(Setting::from_wire(key, value), None, "{key}={value}");
         }
+    }
+
+    #[test]
+    fn raw_command_is_framed_as_given() {
+        let body = json!({"dl": 10, "cl": 60})
+            .as_object()
+            .expect("object")
+            .clone();
+        let command = RawCommand::new(33, 22, body).expect("fits");
+        let request = command.request();
+        assert_eq!((request.action.0, request.message_type.0), (33, 22));
+        assert_eq!(request.body, br#"{"cl":60,"dl":10}"#);
+        assert_eq!(command.to_string(), r#"raw 33/22 {"cl":60,"dl":10}"#);
+    }
+
+    #[test]
+    fn raw_empty_body_is_sent_as_none() {
+        let command = RawCommand::new(2, 100, serde_json::Map::new()).expect("fits");
+        assert!(command.request().body.is_empty());
+        assert_eq!(command.to_string(), "raw 2/100 {}");
+    }
+
+    #[test]
+    fn raw_body_must_fit_one_frame() {
+        let long = json!({"k": "x".repeat(250)})
+            .as_object()
+            .expect("object")
+            .clone();
+        assert_eq!(
+            RawCommand::new(17, 4, long),
+            Err(BodyTooLong { length: 258 })
+        );
     }
 
     #[test]

@@ -59,6 +59,8 @@ const EVENT_BUFFER: usize = 64;
 /// How often `/events` sends a comment while idle, so a client can tell
 /// a quiet daemon from a dead connection.
 pub(crate) const EVENT_KEEP_ALIVE: Duration = Duration::from_secs(15);
+/// Where a unit's socket takes raw commands; TCP never serves it.
+pub(crate) const RAW_PATH: &str = "/raw";
 /// How long open requests may finish after the daemon starts stopping.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// Settings queued from HTTP while one is being applied.
