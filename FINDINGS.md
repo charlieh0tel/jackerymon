@@ -527,6 +527,43 @@ AC output 119.1 V at 60 Hz).  The key was right all along.  The
 earlier silence is unexplained; the phone's Jackery app was attached
 to it around then, which may be the cause.
 
+## Charge levers on the Explorer 3000 (2026-10-17)
+
+Probed on the Explorer 3000 (model 14) at 42% with no input, one
+setting at a time, by message type 4, each confirmed by the echo and a
+status read.  Its baseline was `en=0 dt=10 cs=1 lps=1`.
+
+- Working mode (action 32): `en` 1 and 2 were accepted; 3, 4 and 5
+  were refused, the echo holding the previous value.  Setting 1 or 2
+  also changed battery protection from eco to full (`lps` 1 to 0), and
+  `lps` stayed 0 after `en` was set back to 0; action 22 `{"lps":1}`
+  restored it.
+- Discharge stop (action 31): `dt=20` was accepted, then restored to 10.
+- Backup reserve (action 31, `bpc=50`): echo `{}`; status has no `bpc`.
+- Battery range (action 33, `dl=10 cl=50 bc=45`): echo `{}`; status has
+  no `dl`, `cl` or `bc`.  The app sends action 33 as message type 22,
+  not 4, so this probe was malformed.  Following the app's order,
+  `lps=2` on action 22 was refused (the echo held 1), and action 33 on
+  message type 22 was rejected with code 4.  The custom range is not
+  available on this unit over BLE.
+
+The app's battery setting has three values, not two: `lps` 2 is a
+custom range from `dl` to `cl`, and `cl` is a charge ceiling.  Charge
+plans (actions 26-30) carry days and a start and end time, also on
+their own message types; they were not tried.  Nothing tested so far
+turns charging on or off, and the effect of `en` on charging is
+untested, as neither unit had input.
+
+The cloud's `device/ota/list` gave current versions (Explorer 2000
+units 1.0, Explorer 3000 1.3, HomePower 3000 1.1) with no
+`targetVersionId`, and `device/ota/bluetooth` then returned API error
+10400 (POST) and 10600 (GET).  The app gets `targetVersionId` from
+`device/ota/version/list` instead, posting the unit's own BLE version
+reply (action 2, message type 100).  All three units (Explorer 2000,
+Explorer 3000, HomePower 3000) rejected that request with code 4,
+with an empty body as the app sends it and with `{}`, so no firmware
+was fetched.
+
 ## Open questions
 
 - Is there any way to get the per-device BLE key without the cloud
@@ -538,3 +575,5 @@ to it around then, which may be the cause.
   parser exposes it and both the live advertisement and GATT status
   reported 100; comparison with the display remains outstanding.
 - What is on service `0xbdff` / char `0xff01`?  Untested.
+- Does a charge plan (`en` 1) start or stop AC charging?  Does the
+  HomePower 3000 take the custom range the Explorer 3000 refuses?

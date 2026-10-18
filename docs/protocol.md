@@ -25,7 +25,7 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `lm` | light mode | 0 off, 1 low, 2 high, 3 SOS |
 | `cs` | AC charging mode | 0 fast, 1 quiet (under ~30 dB, slower), 2 custom |
 | `ups` | UPS mode | 0/1 |
-| `lps` | battery protection | 0 full, 1 eco |
+| `lps` | battery protection; the app labels the range | 0 full (0-100%), 1 eco (15-85%), 2 custom (`dl`-`cl`%) |
 | `ec` | error code; app shows n as fault F(n-1) | 0 none |
 | `cip` | car (12 V) input power | W |
 | `acpsp` | solar (MPPT) input power; app adds it to `cip` as DC input | /10 -> W |
@@ -38,8 +38,13 @@ Integers; some scaled.  Shared by the MQTT and BLE paths.
 | `sfc` | emergency charging ("super charge" in code); clears itself after use | 0/1 |
 | `pal` | parallel/expansion battery; app shows merge icon at 2 | |
 | `ta` | temperature alarm | 0 none, 1 high, 2 low |
+| `en` | working mode | 0 auto charge, 1 charge plan, 2 self-consumption, 3 TOU, 4 backup, 5 emergency reserve |
+| `dt` | discharge stop | % |
+| `uo` | UTC offset | s |
+| `dl` / `cl` / `bc` | custom battery range: discharge floor, charge ceiling, and `cl` - 5; app only, not reported by the test units | % |
+| `bpc` | backup reserve; app only, not reported by the test units | % |
 
-Keys from `ec` down were decoded from the app 2.4.2
+Keys from `ec` to `ta` were decoded from the app 2.4.2
 (`PortableBody.java`, `PortablePanelActivity.java`,
 `PortableSettingActivity.java`, `lc/a.java`, `ab/o6.java`, layout
 `panel_activity_portable.xml`); `it` is shown /10 as hours there too.
@@ -277,7 +282,14 @@ BLE message id -> meaning (cloud message name where one exists):
 - 17 light, 18 screen, 19 auto-shutdown, 20 energy saving
 - 21 charge, 22 battery, 23 emergency charge, 24 UPS, 25 time zone
 - 38 custom charge power (`csc`)
-- 26-30 charge/discharge plans (`*ElectricityStrategy`)
+- 2 read module versions for OTA, message type 100; empty body.  The
+  app posts the reply's list, as `{"list":[...]}`, to the cloud's
+  `device/ota/version/list`, which returns the `targetVersionId` that
+  `device/ota/bluetooth` needs for image links.  The test units reject
+  it with code 4 (FINDINGS.md)
+- 26-30 charge/discharge plans (`*ElectricityStrategy`), message types
+  15-18 and 21: 26 read, 27 add, 28 update, 29 delete, 30 read current
+- 31 discharge stop / backup reserve, 32 working mode, 33 battery range
 - 42/43 TOU peaks/troughs (`TOUSchedule`, `QueryTOUSchedule`)
 - 45 reboot (`DeviceReboot`), 46 power off
 - 50 sync MQTT connect info, 51 read sub-device CT, 52 Wi-Fi config
@@ -303,6 +315,18 @@ key (`PortableControlFormat.java`, `lc/a.java`, `cmd/portable/b.java`):
 | 23 | `sfc` | emergency charging |
 | 38 | `csc` | custom charge power, W |
 | 24 | `ups` | UPS mode |
+| 31 | `dt` or `bpc` | discharge stop % (app slider 10-90), or backup reserve % |
+| 32 | `en` | working mode, as the `en` key |
+
+Some actions take another message type (`cmd/portable/b.java`):
+
+| Action | Type | Body |
+|---|---|---|
+| 33 | 22 | `{"dl":lo,"cl":hi,"bc":hi-5}`; the app's custom battery range, under `lps` 2 ("Charging will stop when the battery reaches the set value"); the Explorer 3000 refuses both (FINDINGS.md) |
+| 27, 28 | 16, 17 | a plan: `pid` (creation time, epoch seconds, as a string), `lps` (days, seven `0`/`1` characters, Monday first), `st` / `et` (start / end, `HH:mm`), `tt` 1, `sw` 1 on (`Plan.java`, `PortableStrategyEditActivity.java`) |
+| 26, 30 | 15, 21 | empty |
+
+The plan's `lps` is unrelated to the battery protection key.
 
 Live (2026-10-11): `{"lm":1}` on action 17 was acknowledged in about
 90 ms by a frame with the same action, type 4, result code 0, and the
