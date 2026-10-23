@@ -212,6 +212,12 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   `charlieh0tel/deb-workflows` (`rust-ci.yml`, `rust-build-deb.yml`):
   amd64 and arm64, glibc of Ubuntu 22.04 so Debian bookworm installs it.
   A `v*` tag releases.  The toolchain is pinned in `rust-toolchain.toml`.
+- **Semantic versioning from 1.0.0 (2026-10-23).**  It covers what a
+  user or script depends on: commands and options, HTTP routes and
+  their JSON, metric names and labels, the formats and locations of
+  keys, `names` and sample logs, and `/etc/default/jackerymon`.  A
+  change that breaks any of them is a major version.  The library's
+  Rust API is not covered: it exists for the CLI and is not published.
 - **License: MIT OR Apache-2.0.**
 - **The daemon runs as system user and group `jackerymon`,** from
   `debian/jackerymon.sysusers`, which cargo-deb (3.8 and later) installs

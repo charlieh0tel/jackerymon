@@ -170,6 +170,11 @@ Daemon options are in `/etc/default/jackerymon`.  Samples go to
 `/var/lib/jackerymon/<serial>/`, one file per day; a daily timer gzips finished
 days, and nothing is deleted.
 
+Versions follow semantic versioning from 1.0.0: commands, HTTP
+routes, metrics, and the files the daemon reads and writes change
+incompatibly only with a new major version.  The library's Rust API
+is not covered.
+
 To build the package: `cargo deb -p jackerymon-cli`; to release, see
 [RELEASING.md](RELEASING.md).  `make screenshot` retakes the picture
 above from a running daemon.
