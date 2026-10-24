@@ -140,10 +140,12 @@ by source, the unit's time estimates, AC output, outputs on, fault
 code, and the link (`jackery_connected`, counters, last sample time).
 Readings older than 60 s are left out.
 
-`tools/logs-to-parquet.py OUTPUT [--serial S] [--since T] [--until T] [--ms]`
+`tools/logs-to-parquet.py OUTPUT [--unit U] [--since T] [--until T] [--ms]`
 writes the logged samples to one Parquet file, a row per sample and a
 column per status field, losslessly unless `--ms` truncates timestamps
-to milliseconds; it needs `uv`.
+to milliseconds; it needs `uv`.  Rows carry each unit's name from the
+`names` file, so serials stay out, and an unnamed unit is refused;
+`--serials` labels rows by serial instead.
 
 Setting keys and values are in `docs/protocol.md`; other options are in
 `jackerymon daemon --help`. A custom `--socket` belongs in a directory
