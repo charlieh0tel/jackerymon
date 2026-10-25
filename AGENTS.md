@@ -89,6 +89,15 @@ units over BLE.  IP/MQTT was ruled out for the Explorer; see `FINDINGS.md`.
   latest version of dependencies.
 
 
+## Shell Rules
+
+- Follow the Google Shell Style Guide
+  (https://google.github.io/styleguide/shellguide.html): bash, a
+  `main`, `local` and `readonly`, `"${var}"`, errors to stderr.
+- Scripts must pass `shellcheck -o all`.  Disable a check only on the
+  line that needs it, with the reason.
+
+
 ## Working style
 
 - **Adversarial review**: when a new idea/direction lands, run an
