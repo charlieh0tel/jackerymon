@@ -246,9 +246,9 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
   minutes after midnight for the day before, or a clock stepping back
   into a compressed day, is not compressed and makes `compress-logs`
   report the leftover file.
-- **RUSTSEC-2023-0071 (`rsa`, Marvin timing attack) is accepted.**  It
-  concerns private-key operations; `jackerymon key` only encrypts with
-  the app's public key.  CI ignores that advisory by ID.
+- **RUSTSEC-2023-0071 (`rsa`, Marvin timing attack) no longer applies.**
+  It was accepted while `rsa` was 0.9; 0.10's constant-time
+  `crypto-bigint` backend clears it, and CI no longer ignores it.
 
 ## Next steps and open questions
 

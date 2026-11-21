@@ -35,9 +35,8 @@ use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
 use reqwest::redirect::Policy;
 use rsa::Pkcs1v15Encrypt;
-use rsa::RsaPublicKey;
+use rsa::PublicKey;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::rand_core::OsRng;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -361,10 +360,10 @@ fn login_fields(body: &[u8]) -> Result<[(&'static str, String); 2]> {
     // The base64 text is the key; decoding it first would be wrong.
     let aes_key = STANDARD.encode(seed);
     let encrypted = encrypt_body(&aes_key, body)?;
-    let public = RsaPublicKey::from_public_key_der(&STANDARD.decode(PUBLIC_KEY)?)
+    let public = PublicKey::from_public_key_der(&STANDARD.decode(PUBLIC_KEY)?)
         .context("decoding the app's RSA key")?;
     let wrapped = public
-        .encrypt(&mut OsRng, Pkcs1v15Encrypt, aes_key.as_bytes())
+        .encrypt(&mut rand::rng(), Pkcs1v15Encrypt, aes_key.as_bytes())
         .context("wrapping the AES key")?;
     Ok([
         ("aesEncryptData", STANDARD.encode(encrypted)),

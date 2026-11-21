@@ -17,8 +17,6 @@ jobs:
     with:
       packages: jackerymon-cli
       build-deps: "libdbus-1-dev pkg-config"
-      # See ci.yml.
-      audit-args: "--ignore RUSTSEC-2023-0071"
     secrets: inherit
 
   trigger-apt-repo:
