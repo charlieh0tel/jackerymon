@@ -7,7 +7,7 @@ publishes a GitHub Release (`.github/workflows/build-deb.yml`); a failed
 1. Bump `version` in both crates and the CLI's `jackerymon` dependency;
    `cargo update -w`.
 2. Check: `make ci`, `make test-web` (once `make web-deps`),
-   `cargo audit --ignore RUSTSEC-2023-0071` (see PLAN.md).
+   `cargo audit`.
 3. Merge through a PR; wait for CI.
 4. Package tests are off for now (2026-10-16): `tools/test-package.sh`
    installs the CI-built `.deb` in Docker, and Docker here could not
