@@ -23,8 +23,6 @@ use axum::response::sse::KeepAlive;
 use axum::response::sse::Sse;
 use axum::routing::get;
 use axum::routing::post;
-use chrono::DateTime;
-use chrono::Utc;
 use futures::Stream;
 use futures::StreamExt;
 use futures::stream;
@@ -35,6 +33,7 @@ use jackerymon::control::Setting;
 use jackerymon::poll::ControlRequest;
 use jackerymon::poll::RawRequest;
 use jackerymon::poll::SettingRequest;
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -311,13 +310,15 @@ async fn series(State(unit): State<Arc<Unit>>, Query(query): Query<SeriesQuery>)
 }
 
 /// `since` and `until` (now when absent) parsed as RFC 3339.
-fn time_range(since: &str, until: Option<&str>) -> Result<(DateTime<Utc>, DateTime<Utc>), String> {
+fn time_range(since: &str, until: Option<&str>) -> Result<(Timestamp, Timestamp), String> {
     let parse = |text: &str| {
-        DateTime::parse_from_rfc3339(text)
-            .map(|time| time.with_timezone(&Utc))
+        text.parse::<Timestamp>()
             .map_err(|_| format!("{text:?} is not an RFC 3339 time"))
     };
-    Ok((parse(since)?, until.map_or_else(|| Ok(Utc::now()), parse)?))
+    Ok((
+        parse(since)?,
+        until.map_or_else(|| Ok(Timestamp::now()), parse)?,
+    ))
 }
 
 /// Server-sent events, one [`Update`] each as JSON: first the current

@@ -5,11 +5,10 @@
 use std::path::Path;
 
 use anyhow::Result;
-use chrono::DateTime;
-use chrono::Utc;
 use jackerymon::identity::ModelCode;
 use jackerymon::status::Status;
 use jackerymon::status::TemperatureAlarm;
+use jiff::Timestamp;
 use serde::Serialize;
 
 use super::log;
@@ -228,11 +227,11 @@ fn fault(status: &Status) -> Option<bool> {
 /// gap.
 pub(super) fn series(
     directory: &Path,
-    since: DateTime<Utc>,
-    until: DateTime<Utc>,
+    since: Timestamp,
+    until: Timestamp,
     every: i64,
 ) -> Result<Series> {
-    let span = (until - since).num_seconds().max(1);
+    let span = until.duration_since(since).as_secs().max(1);
     // The span is positive, so this rounds up.
     let every = every.max(1).max((span + MAX_POINTS - 1) / MAX_POINTS);
     let stale = i64::try_from(STALE_AFTER.as_secs()).unwrap_or(i64::MAX);
@@ -245,19 +244,19 @@ pub(super) fn series(
     // When the previous sample was taken, and the first bucket after its
     // own, which is where a gap after it starts.  Before any sample, the
     // range's start and its bucket.
-    let mut previous = since.timestamp();
+    let mut previous = since.as_second();
     let mut next_bucket = bucket_of(previous);
     log::read_history(directory, since, until, |line| {
         let Ok(record) = serde_json::from_str::<SampleRecord>(line) else {
             return true;
         };
         let (Ok(taken), Ok(status)) = (
-            DateTime::parse_from_rfc3339(&record.timestamp),
+            record.timestamp.parse::<Timestamp>(),
             Status::try_from(record.status),
         ) else {
             return true;
         };
-        let seconds = taken.timestamp();
+        let seconds = taken.as_second();
         let start = bucket_of(seconds);
         if bucket.as_ref().is_some_and(|bucket| bucket.start != start) {
             series.push(&bucket.take().expect("checked"));
@@ -309,7 +308,7 @@ pub(super) fn series(
     })?;
     if let Some(bucket) = bucket {
         series.push(&bucket);
-        if until.timestamp() - previous > stale && next_bucket <= until.timestamp() {
+        if until.as_second() - previous > stale && next_bucket <= until.as_second() {
             series.push_gap(next_bucket);
         }
     }
@@ -320,18 +319,20 @@ pub(super) fn series(
 mod tests {
     use std::fs;
 
-    use chrono::DateTime;
+    use jiff::SignedDuration;
+    use jiff::Timestamp;
     use serde_json::json;
 
     use super::series;
     use crate::record::SampleRecord;
+    use crate::record::timestamp_text;
 
     /// A logged sample `offset` seconds after 2026-10-11T12:00:00Z.
     fn sample_at(offset: i64, ip: u32) -> String {
-        let taken = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z").expect("time")
-            + chrono::Duration::seconds(offset);
+        let taken = "2026-10-11T12:00:00Z".parse::<Timestamp>().expect("time")
+            + SignedDuration::from_secs(offset);
         SampleRecord {
-            timestamp: taken.to_rfc3339(),
+            timestamp: timestamp_text(taken),
             sample: 0,
             connection: 1,
             transport_failures: 0,
@@ -355,10 +356,8 @@ mod tests {
             .map(|&offset| sample_at(offset, 100))
             .collect();
         fs::write(directory.join("2026-10-11.jsonl"), lines.join("\n") + "\n").expect("log");
-        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
-            .expect("time")
-            .to_utc();
-        let at = |offset: i64| noon + chrono::Duration::seconds(offset);
+        let noon = "2026-10-11T12:00:00Z".parse::<Timestamp>().expect("time");
+        let at = |offset: i64| noon + SignedDuration::from_secs(offset);
         let series = series(&directory, at(since), at(until), every).expect("series");
         fs::remove_dir_all(&directory).expect("cleanup");
         series
@@ -366,9 +365,10 @@ mod tests {
 
     /// The unix time `offset` seconds after noon.
     fn noon_plus(offset: i64) -> i64 {
-        DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+        "2026-10-11T12:00:00Z"
+            .parse::<Timestamp>()
             .expect("time")
-            .timestamp()
+            .as_second()
             + offset
     }
 
@@ -420,11 +420,9 @@ mod tests {
                 .clone(),
         };
         fs::write(directory.join("2026-10-11.jsonl"), format!("{line}\n")).expect("log");
-        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
-            .expect("time")
-            .to_utc();
+        let noon = "2026-10-11T12:00:00Z".parse::<Timestamp>().expect("time");
         let series =
-            series(&directory, noon, noon + chrono::Duration::seconds(30), 60).expect("series");
+            series(&directory, noon, noon + SignedDuration::from_secs(30), 60).expect("series");
         fs::remove_dir_all(&directory).expect("cleanup");
         assert_eq!(series.input_watts, [Some(350.0)]);
         assert_eq!(series.ac_input_watts, [Some(300.0)]);
@@ -462,11 +460,9 @@ mod tests {
         ]
         .join("\n");
         fs::write(directory.join("2026-10-11.jsonl"), format!("{lines}\n")).expect("log");
-        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
-            .expect("time")
-            .to_utc();
+        let noon = "2026-10-11T12:00:00Z".parse::<Timestamp>().expect("time");
         let series =
-            series(&directory, noon, noon + chrono::Duration::seconds(15), 10).expect("series");
+            series(&directory, noon, noon + SignedDuration::from_secs(15), 10).expect("series");
         fs::remove_dir_all(&directory).expect("cleanup");
         assert_eq!(series.ac_output_volts, [Some(121.0), None]);
         assert_eq!(series.ac_output_hertz, [Some(60.0), None]);
@@ -508,11 +504,9 @@ mod tests {
         ]
         .join("\n");
         fs::write(directory.join("2026-10-11.jsonl"), format!("{lines}\n")).expect("log");
-        let noon = DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
-            .expect("time")
-            .to_utc();
+        let noon = "2026-10-11T12:00:00Z".parse::<Timestamp>().expect("time");
         let series =
-            series(&directory, noon, noon + chrono::Duration::seconds(8), 10).expect("series");
+            series(&directory, noon, noon + SignedDuration::from_secs(8), 10).expect("series");
         fs::remove_dir_all(&directory).expect("cleanup");
         assert_eq!(series.ac_output_on, [Some(0.5)]);
         assert_eq!(series.dc_output_on, [Some(0.0)]);
@@ -549,7 +543,7 @@ mod tests {
         };
         let lines = [line(0, 10, 90), line(5, 30, 92), line(10, 50, 94)].join("\n");
         fs::write(directory.join("2026-10-11.jsonl"), format!("{lines}\n")).expect("log");
-        let at = |text: &str| DateTime::parse_from_rfc3339(text).expect("time").to_utc();
+        let at = |text: &str| text.parse::<Timestamp>().expect("time");
         let series = series(
             &directory,
             at("2026-10-11T12:00:00Z"),
@@ -568,7 +562,7 @@ mod tests {
     #[test]
     fn long_ranges_are_thinned_to_the_point_limit() {
         let directory = std::env::temp_dir();
-        let at = |text: &str| DateTime::parse_from_rfc3339(text).expect("time").to_utc();
+        let at = |text: &str| text.parse::<Timestamp>().expect("time");
         let week = series(
             &directory.join("jackerymon-series-none"),
             at("2026-10-01T00:00:00Z"),

@@ -17,19 +17,19 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use chrono::DateTime;
-use chrono::Utc;
 use clap::Args;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use serde::Deserialize;
 
 use crate::record::SampleRecord;
 
 /// Length of the `YYYY-MM-DD` prefix of an RFC 3339 timestamp.
 const DATE_LENGTH: usize = 10;
-/// `chrono` format of that prefix.
+/// `strftime` format of that prefix.
 const DATE_FORMAT: &str = "%Y-%m-%d";
 const LOG_EXTENSION: &str = "jsonl";
 /// Appended to a finished day's file name.
@@ -46,7 +46,7 @@ pub(crate) struct CompressArgs {
 
 /// `jackerymon compress-logs`: gzips each day's log once the day is over.
 pub(crate) fn compress_logs(arguments: &CompressArgs) -> Result<()> {
-    let today = Utc::now().format(DATE_FORMAT).to_string();
+    let today = Timestamp::now().strftime(DATE_FORMAT).to_string();
     let mut failures = 0;
     let mut directories = vec![arguments.directory.clone()];
     directories.extend(subdirectories(&arguments.directory)?);
@@ -180,13 +180,14 @@ fn archive_matches(archive: &Path, source: &Path) -> Result<bool> {
 /// not parse, such as one the daemon is still writing, is skipped.
 pub(super) fn read_history(
     directory: &Path,
-    since: DateTime<Utc>,
-    until: DateTime<Utc>,
+    since: Timestamp,
+    until: Timestamp,
     mut emit: impl FnMut(&str) -> bool,
 ) -> Result<()> {
-    let mut day = since.date_naive();
-    while day <= until.date_naive() {
-        let plain = log_path(directory, &day.format(DATE_FORMAT).to_string());
+    let last_day = until.to_zoned_datetime(TimeZone::UTC).date();
+    let mut day = since.to_zoned_datetime(TimeZone::UTC).date();
+    while day <= last_day {
+        let plain = log_path(directory, &day.strftime(DATE_FORMAT).to_string());
         let mut compressed_name = plain.file_name().context("no file name")?.to_owned();
         compressed_name.push(COMPRESSED_SUFFIX);
         let compressed = plain.with_file_name(compressed_name);
@@ -210,14 +211,14 @@ pub(super) fn read_history(
             let Ok(stamp) = serde_json::from_str::<Stamp>(&line) else {
                 continue;
             };
-            let Ok(taken) = DateTime::parse_from_rfc3339(&stamp.timestamp) else {
+            let Ok(taken) = stamp.timestamp.parse::<Timestamp>() else {
                 continue;
             };
-            if (since..=until).contains(&taken.with_timezone(&Utc)) && !emit(&line) {
+            if (since..=until).contains(&taken) && !emit(&line) {
                 return Ok(());
             }
         }
-        day = day.succ_opt().context("date out of range")?;
+        day = day.tomorrow().context("date out of range")?;
     }
     Ok(())
 }
@@ -247,7 +248,7 @@ impl SampleLog {
             }
             _ => {}
         }
-        let day = Utc::now().format(DATE_FORMAT).to_string();
+        let day = Timestamp::now().strftime(DATE_FORMAT).to_string();
         let file = open(&directory, &day)?;
         Ok(Self {
             directory,
@@ -291,6 +292,7 @@ fn open(directory: &Path, day: &str) -> Result<File> {
 mod tests {
     use std::fs;
 
+    use jiff::Timestamp;
     use serde_json::json;
 
     use std::io::Read;
@@ -480,11 +482,7 @@ mod tests {
             format!("{second_day}\n"),
         )
         .expect("plain");
-        let at = |text: &str| {
-            chrono::DateTime::parse_from_rfc3339(text)
-                .expect("time")
-                .to_utc()
-        };
+        let at = |text: &str| text.parse::<Timestamp>().expect("time");
         let mut samples = Vec::new();
         read_history(
             &directory,

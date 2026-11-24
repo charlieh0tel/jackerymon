@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use chrono::DateTime;
 use jackerymon::control::Setting;
 use jackerymon::status::Status;
+use jiff::Timestamp;
 use tokio::time::Instant;
 
 use crate::record::Update;
@@ -147,9 +147,11 @@ impl Monitor {
 /// unreadable timestamp, or one ahead of this host's clock, counts as
 /// new.
 fn age(timestamp: &str, now: SystemTime) -> Duration {
-    DateTime::parse_from_rfc3339(timestamp)
+    timestamp
+        .parse::<Timestamp>()
         .ok()
-        .and_then(|taken| now.duration_since(SystemTime::from(taken)).ok())
+        .and_then(|taken| SystemTime::try_from(taken).ok())
+        .and_then(|taken| now.duration_since(taken).ok())
         .unwrap_or_default()
 }
 
@@ -158,9 +160,7 @@ pub(super) mod tests {
     use std::time::Duration;
     use std::time::SystemTime;
 
-    use chrono::DateTime;
-    use chrono::SecondsFormat;
-    use chrono::Utc;
+    use jiff::Timestamp;
     use serde_json::Value;
     use serde_json::json;
     use tokio::time::Instant;
@@ -170,6 +170,7 @@ pub(super) mod tests {
     use super::Monitor;
     use crate::record::SampleRecord;
     use crate::record::Update;
+    use crate::record::timestamp_text;
 
     pub(in crate::tui) fn sample(number: u64, status: Value) -> Update {
         sample_taken(number, status, SystemTime::now())
@@ -177,7 +178,7 @@ pub(super) mod tests {
 
     fn sample_taken(number: u64, status: Value, taken: SystemTime) -> Update {
         Update::Sample(SampleRecord {
-            timestamp: DateTime::<Utc>::from(taken).to_rfc3339_opts(SecondsFormat::Micros, false),
+            timestamp: timestamp_text(Timestamp::try_from(taken).expect("time")),
             sample: number,
             connection: 1,
             transport_failures: 0,
