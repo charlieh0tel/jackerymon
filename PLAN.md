@@ -262,6 +262,12 @@ logging daemon, a TUI, a web view, and a Prometheus exporter.
    localhost.
 4. Compare telemetry with the display under a known load.
 5. Reset/unbinding effect on the key.
+6. Publish `jackerymon` (the library) to crates.io; the name is free.
+   Before: narrow the public modules (`test_support`, `key_file`) or
+   publish as 0.x, since 1.x makes them a semver promise; add
+   `keywords`, `categories`, a library README and crate docs; note
+   Linux only (BlueZ); add the publish step to `RELEASING.md`.
+   `jackerymon-cli` is optional: the debs already cover installs.
 
 ## Housekeeping
 
