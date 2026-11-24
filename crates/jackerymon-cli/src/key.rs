@@ -26,9 +26,8 @@ use anyhow::Result;
 use anyhow::bail;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use chrono::Local;
-use chrono::Offset;
 use clap::Args;
+use jiff::ZonedDateTime;
 use reqwest::Method;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
@@ -266,7 +265,7 @@ impl Cloud {
 
     /// Binds the unit to the account; the response carries the key.
     async fn bind(&self, unit: &UnitRecord) -> Result<Fetched> {
-        let offset_minutes = Local::now().offset().fix().local_minus_utc() / SECONDS_PER_MINUTE;
+        let offset_minutes = ZonedDateTime::now().offset().seconds() / SECONDS_PER_MINUTE;
         let fields = [
             ("devId", unit.serial.clone()),
             ("guid", unit.guid.clone()),

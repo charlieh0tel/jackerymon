@@ -9,13 +9,11 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use chrono::DateTime;
-use chrono::SecondsFormat;
-use chrono::Utc;
 use clap::Args;
 use futures::StreamExt;
 use jackerymon::control::RawCommand;
 use jackerymon::control::Setting;
+use jiff::Timestamp;
 use reqwest::StatusCode;
 use serde_json::Value;
 use serde_json::json;
@@ -259,8 +257,8 @@ impl DaemonClient {
 
     /// Logged samples since `since`, oldest first; none when the daemon
     /// keeps no log.
-    pub(crate) async fn history(&self, since: DateTime<Utc>) -> Result<Vec<Update>> {
-        let since = since.to_rfc3339_opts(SecondsFormat::Micros, true);
+    pub(crate) async fn history(&self, since: Timestamp) -> Result<Vec<Update>> {
+        let since = since.to_string();
         let response = self
             .client
             .get(format!("{}/history", self.base))

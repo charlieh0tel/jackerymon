@@ -409,6 +409,7 @@ mod tests {
 
     use anyhow::anyhow;
     use futures::StreamExt;
+    use jiff::Timestamp;
     use reqwest::StatusCode;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
@@ -835,9 +836,10 @@ mod tests {
                 .expect("json");
                 // The one sample's minute, among gaps where the range runs
                 // past it.
-                let taken = chrono::DateTime::parse_from_rfc3339("2026-10-11T12:00:00Z")
+                let taken = "2026-10-11T12:00:00Z"
+                    .parse::<Timestamp>()
                     .expect("time")
-                    .timestamp();
+                    .as_second();
                 let times = series["time"].as_array().expect("column");
                 assert!(times.contains(&taken.into()), "{times:?}");
                 assert_eq!(series["every"], 60);

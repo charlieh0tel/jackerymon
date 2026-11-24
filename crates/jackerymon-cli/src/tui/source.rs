@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
-use chrono::Utc;
 use jackerymon::ble;
 use jackerymon::control::Setting;
 use jackerymon::identity::ModelCode;
 use jackerymon::poll::ControlRequest;
 use jackerymon::poll::SettingRequest;
+use jiff::Timestamp;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -133,9 +133,12 @@ pub(super) async fn daemon(endpoint: &Endpoint, expected: Option<&str>) -> Resul
     let (sender, updates) = mpsc::unbounded_channel();
     // The chart's window of logged samples, so it opens full; the live
     // stream then replays the latest, which the monitor skips as a repeat.
-    let window = chrono::Duration::from_std(HISTORY).context("chart window")?;
     for update in client
-        .history(Utc::now() - window)
+        .history(
+            Timestamp::now()
+                .checked_sub(HISTORY)
+                .context("chart window")?,
+        )
         .await
         .unwrap_or_default()
     {

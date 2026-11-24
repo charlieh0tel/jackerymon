@@ -3,19 +3,26 @@
 
 use std::fmt;
 
-use chrono::DateTime;
-use chrono::SecondsFormat;
-use chrono::Utc;
 use jackerymon::ble::Sighting;
 use jackerymon::frame::RawStatus;
 use jackerymon::poll::PollEvent;
 use jackerymon::poll::Sample;
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 
+/// `strftime` format of a sample timestamp: RFC 3339, UTC, microseconds,
+/// the offset spelled `+00:00` as the Python PoC and every existing log
+/// spell it.
+const TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.6f+00:00";
 const MILLIS_PER_SECOND: f64 = 1000.0;
 /// `query_ms` is rounded to tenths, as the Python PoC does.
 const QUERY_MS_STEPS_PER_MILLI: f64 = 10.0;
+
+/// `taken` as a sample timestamp.
+pub(crate) fn timestamp_text(taken: Timestamp) -> String {
+    taken.strftime(TIMESTAMP_FORMAT).to_string()
+}
 
 /// One sample in the Python PoC's `--poll` line shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,8 +39,9 @@ pub(crate) struct SampleRecord {
 impl From<&Sample> for SampleRecord {
     fn from(sample: &Sample) -> Self {
         Self {
-            timestamp: DateTime::<Utc>::from(sample.timestamp)
-                .to_rfc3339_opts(SecondsFormat::Micros, false),
+            timestamp: timestamp_text(
+                Timestamp::try_from(sample.timestamp).expect("sample time in range"),
+            ),
             sample: sample.sample,
             connection: sample.connection,
             transport_failures: sample.transport_failures,
